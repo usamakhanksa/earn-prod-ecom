@@ -1,0 +1,4 @@
+# Generated Prisma client — kept out of node_modules/@prisma/client (shared,
+# hoisted by the root .npmrc) on purpose, see prisma/schema.prisma. Regenerate
+# with `pnpm --filter @marketplace/api db:generate`.
+src/generated/

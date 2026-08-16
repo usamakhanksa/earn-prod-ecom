@@ -1,0 +1,15 @@
+{
+  "extends": "@marketplace/config/tsconfig/tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-native",
+    "allowJs": true,
+    "noEmit": true,
+    "types": ["react"]
+  },
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules"]
+}

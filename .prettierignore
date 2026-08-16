@@ -1,0 +1,13 @@
+# build artifacts
+dist/
+build/
+.next/
+.expo/
+web-build/
+out/
+coverage/
+.turbo/
+node_modules/
+
+# lockfile stays formatted
+pnpm-lock.yaml

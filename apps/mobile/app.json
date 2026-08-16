@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "OmniSell",
+    "slug": "omnisell-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "omnisell",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.omnisell.mobile"
+    },
+    "android": {
+      "package": "com.omnisell.mobile"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-local-authentication",
+        { "faceIDPermission": "Unlock OmniSell with Face ID." }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "OmniSell needs photo library access to upload a design as an asset.",
+          "cameraPermission": "OmniSell needs camera access to capture a design as an asset."
+        }
+      ]
+    ]
+  }
+}

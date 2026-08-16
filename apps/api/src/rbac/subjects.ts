@@ -1,0 +1,62 @@
+/** CASL subjects — domain entities an ability rule can target. `all` is CASL's wildcard. */
+export const SUBJECTS = [
+  'all',
+  'Tenant',
+  'Membership',
+  'Product',
+  'Wallet',
+  'PointTransaction',
+  'PointEarningRule',
+  'VideoContent',
+  'ApiKey',
+  'FeatureFlag',
+  'FeatureFlagTarget',
+  'AuditLog',
+  'Invite',
+  'Notification',
+  // Phase 2 — Studio & Catalog
+  'Asset',
+  'Collection',
+  'Blueprint',
+  'ProductVariant',
+  'DesignPlacement',
+  'PricingRule',
+  'MockupTemplate',
+  // Phase 3 — Connector Framework
+  'ConnectorDefinition',
+  'Connection',
+  'Credential',
+  // Phase 4 — Publishing Pipeline & Export Packs
+  'Listing',
+  'SyncJob',
+  'ExportPack',
+  'BannedTerm',
+  // Phase 4.5 — Points Economy (VideoContent/Wallet/PointTransaction/
+  // PointEarningRule already existed from the Phase 0 scaffold)
+  'VideoWatch',
+  'TenantPointSettings',
+  'ProductPurchaseWithPoints',
+  'LedgerEntry',
+  // Phase 5 — Orders, Fulfilment & Digital Delivery
+  'Order',
+  'OrderException',
+  'Fulfilment',
+  'FulfilmentRoutingRule',
+  'Return',
+  'Refund',
+  'Reprint',
+  'BuyerMessageTemplate',
+  'DigitalProduct',
+  'Entitlement',
+  'LicenceKey',
+  'Coupon',
+  // Phase 6 — Finance, Ledger & Tax
+  'Expense',
+  'FinancePayout',
+  'Invoice',
+  'TaxNexus',
+  'PeriodLock',
+  'FinanceDispute',
+  'Subscription',
+] as const;
+export type Subject = (typeof SUBJECTS)[number];

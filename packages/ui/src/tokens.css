@@ -1,0 +1,101 @@
+/*
+ * OmniSell design tokens — "Corporate Precision" (prompt.md) + consumer sub-theme
+ * (docs/points-extension.md §5). Augment with Next font variables at the app level:
+ *   --font-display (Plus Jakarta Sans), --font-inter (Inter), --font-mono (IBM Plex Mono).
+ */
+:root {
+  /* Neutrals — cool graphite */
+  --ink-950: #0a0c10;
+  --ink-900: #101319;
+  --ink-800: #171b23;
+  --ink-700: #232833;
+  --ink-600: #333a47;
+  --ink-400: #6b7484;
+  --ink-200: #c9cfda;
+  --ink-100: #e7eaf0;
+  --ink-50: #f6f7fa;
+
+  /* Brand — deep indigo authority */
+  --brand-600: #3b4be8;
+  --brand-500: #4f5ff5;
+  --brand-400: #7a86ff;
+  --brand-soft: #eef0ff;
+
+  /* Accent — signal amber (money/value highlights; consumer CTA colour) */
+  --accent-500: #f2a73b;
+  --accent-600: #d98a1e;
+
+  /* Semantic */
+  --success: #12a150;
+  --warning: #d98a1e;
+  --danger: #e5484d;
+  --info: #0a7ea4;
+
+  /* Elevation — layered shadow, never a single blurry blob */
+  --sh-1: 0 1px 2px rgba(10, 12, 16, 0.06), 0 1px 1px rgba(10, 12, 16, 0.04);
+  --sh-2: 0 4px 12px rgba(10, 12, 16, 0.08), 0 1px 3px rgba(10, 12, 16, 0.06);
+  --sh-3: 0 16px 40px rgba(10, 12, 16, 0.14), 0 2px 8px rgba(10, 12, 16, 0.08);
+
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* Consumer sub-theme (points-extension.md §5) */
+  --consumer-accent: var(--accent-500);
+  --surface-consumer: #fbfbfa;
+  --radius-consumer: 18px;
+
+  /* Font stacks (apps inject real faces via next/font / expo-font) */
+  --font-display: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-inter: 'Inter', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  /* Semantic surfaces */
+  --surface-0: #ffffff;
+  --surface-1: #f6f7fa;
+  --surface-2: #e7eaf0;
+  --surface-inverse: #0a0c10;
+  --text-primary: var(--ink-950);
+  --text-secondary: var(--ink-600);
+  --border-subtle: var(--ink-100);
+}
+
+[data-theme='dark'] {
+  --surface-0: #101319;
+  --surface-1: #171b23;
+  --surface-2: #232833;
+  --surface-inverse: #f6f7fa;
+  --text-primary: var(--ink-100);
+  --text-secondary: var(--ink-200);
+  --border-subtle: var(--ink-700);
+
+  /* desaturate accents 8% for dark-mode calm */
+  --accent-500: #e8a74a;
+  --accent-600: #d39a3a;
+  --success: #1cb45f;
+  --consumer-accent: #e8a74a;
+  --surface-consumer: #171b23;
+}
+
+/* Margin waterfall chart (prompt.md "signature moment #1") — grow-in bar
+ * animation. Deliberately CSS-only (no JS mount-state toggle); see
+ * MarginWaterfallChart.tsx's doc comment for why. */
+@keyframes omnisell-waterfall-grow {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+.omnisell-waterfall-bar {
+  transform-origin: bottom;
+  animation: omnisell-waterfall-grow 500ms var(--ease) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .omnisell-waterfall-bar {
+    animation: none;
+  }
+}

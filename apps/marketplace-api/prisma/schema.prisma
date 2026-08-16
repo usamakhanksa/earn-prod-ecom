@@ -1,0 +1,345 @@
+// GlobalMart marketplace-api schema — entirely separate from OmniSell's own
+// Prisma schema/database. Its own datasource env var (MARKETPLACE_DATABASE_URL)
+// so the two can coexist in one .env without collision.
+//
+// Phase 1 scope only (see docs/marketplace/PHASE_1_REPORT.md): enough models
+// to support country-aware auth + the country detection/config engine.
+// Orders, wallet, tasks/offers, commissions, payouts, referrals are later
+// phases — not modeled here yet (see docs/marketplace/DEBT.md).
+//
+// id default uses cuid() rather than cuid2() — Prisma 5.x ships no built-in
+// cuid2() generator (same known limitation OmniSell's own schema notes);
+// revisit with Prisma 6 or a custom default.
+
+generator client {
+  provider = "prisma-client-js"
+  // The root .npmrc sets node-linker=hoisted (kept as-is for OmniSell's
+  // Expo app — not ours to change), which flattens every workspace into
+  // one shared node_modules. Without a custom output path, `prisma
+  // generate` here would write into the same node_modules/@prisma/client
+  // OmniSell's own apps/api schema generates into, clobbering it. A
+  // package-local output path keeps this schema's generated client
+  // entirely separate.
+  output   = "../src/generated/prisma-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("MARKETPLACE_DATABASE_URL")
+}
+
+enum Role {
+  USER
+  SUPPLIER
+  AFFILIATE
+  ADMIN
+  SUPER_ADMIN
+  SUPPORT
+  FINANCE
+}
+
+enum SupplierStatus {
+  PENDING
+  APPROVED
+  SUSPENDED
+  REJECTED
+}
+
+enum AffiliateStatus {
+  PENDING
+  APPROVED
+  SUSPENDED
+  REJECTED
+}
+
+/// Authenticated principal. Phase 1 builds real register/login for the
+/// USER role; Supplier/Affiliate/Admin auth surfaces follow the same
+/// AuthService in a later pass (see docs/marketplace/DEBT.md).
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         Role      @default(USER)
+  /// Resolved/selected 2-letter country code. Not a DB foreign key to
+  /// Country on purpose — CountryConfig/Country rows are seeded
+  /// independently of user signup order; validity is enforced by
+  /// CountryConfigService at the service layer, not by a DB constraint.
+  countryCode  String?
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  supplier     Supplier?
+  affiliate    Affiliate?
+
+  @@index([role])
+  @@index([countryCode])
+}
+
+/// ISO 3166-1 alpha-2 country reference data.
+model Country {
+  id         String   @id @default(cuid())
+  code       String   @unique
+  name       String
+  nativeName String?
+  region     String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+/// ISO 4217 currency reference data.
+model Currency {
+  id            String   @id @default(cuid())
+  code          String   @unique
+  name          String
+  symbol        String
+  decimalDigits Int      @default(2)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+/// ISO 639-1 language reference data.
+model Language {
+  id         String   @id @default(cuid())
+  code       String   @unique
+  name       String
+  nativeName String?
+  isRtl      Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+/// This product's defining engine's persisted data: one row per supported
+/// country, driving currency/language/timezone/payment/marketplace/shipping
+/// decisions everywhere — never hardcoded per-country branches in code.
+model CountryConfig {
+  id                     String   @id @default(cuid())
+  code                   String   @unique
+  name                   String
+  nativeName             String?
+  currency               String   @default("USD")
+  currencySymbol         String   @default("$")
+  defaultLanguage        String   @default("en")
+  timezone               String   @default("UTC")
+  isActive               Boolean  @default(true)
+  supportedPayments      Json     @default("[]")
+  supportedMarketplaces  Json     @default("[]")
+  shippingProviders      Json     @default("[]")
+  /// Category slugs this country's marketplace never sells (Phase 2's
+  /// country product rule engine — packages/marketplace-country's
+  /// CountryProductRulesService — reads this; never a hardcoded
+  /// `if (country === 'SA')` branch in route/UI code).
+  restrictedCategorySlugs Json   @default("[]")
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([isActive])
+}
+
+/// Phase 2 addition: optional product image for category grid/detail pages.
+model Category {
+  id              String            @id @default(cuid())
+  slug            String            @unique
+  name            String
+  description     String?
+  /// Phase 2: category card/detail image. Nullable — not every seeded
+  /// category has one yet.
+  imageUrl        String?
+  parentId        String?
+  parent          Category?         @relation("CategoryTree", fields: [parentId], references: [id])
+  children        Category[]        @relation("CategoryTree")
+  isActive        Boolean           @default(true)
+  sortOrder       Int               @default(0)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  /// Primary category relation (Phase 1, unchanged).
+  products        Product[]
+  /// Phase 2: secondary/additional category tagging (many-to-many).
+  productCategories ProductCategory[]
+}
+
+/// Phase 2 additions: normalization fields (source/sourceProductId) so a
+/// row can originate from this marketplace's own catalog OR a future
+/// external supplier feed (e.g. CJ Dropshipping) without a shape change;
+/// compareAtPrice/rating/ratingCount/defaultShippingDays feed the
+/// UnifiedProduct normalization the spec requires. The Phase 1
+/// `countries String[]` denormalized column is REMOVED here in favor of
+/// the new relational `ProductCountry` join table below — Phase 2 needs
+/// per-country availability *and* per-country price/currency overrides,
+/// which a flat string array can't express; a real relation is the correct
+/// extension once that finer granularity is actually needed (documented
+/// choice, see docs/marketplace/PHASE_2_REPORT.md).
+model Product {
+  id                  String            @id @default(cuid())
+  sku                 String            @unique
+  title               String
+  slug                String            @unique
+  description         String?
+  basePrice           Decimal           @db.Decimal(12, 2)
+  baseCurrency        String            @default("USD")
+  /// Original/pre-discount price, for showing a struck-through price +
+  /// discount % on the product card. Null = no discount.
+  compareAtPrice      Decimal?          @db.Decimal(12, 2)
+  /// Average rating 0.00-5.00. Null = no ratings yet.
+  rating              Decimal?          @db.Decimal(3, 2)
+  ratingCount         Int               @default(0)
+  /// Provenance of this catalog row: "internal" (this marketplace's own
+  /// seeded/curated catalog, served by MockMarketplaceProvider) or
+  /// "cj_dropshipping" (served by CJDropshippingProvider). Not a Prisma
+  /// enum on purpose — new providers are added by adding a new
+  /// MarketplaceProvider implementation, not by migrating this column.
+  source              String            @default("internal")
+  /// The product's id in its source system. Null for "internal" rows.
+  sourceProductId     String?
+  /// Baseline shipping estimate in days from the supplier's origin,
+  /// combined at request time with the destination CountryConfig's
+  /// shippingProviders — see providers/normalize.ts. Null = unknown.
+  defaultShippingDays Int?
+  categoryId          String?
+  category            Category?         @relation(fields: [categoryId], references: [id])
+  supplierId          String?
+  supplier            Supplier?         @relation(fields: [supplierId], references: [id])
+  isActive            Boolean           @default(true)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  images              ProductImage[]
+  variants            ProductVariant[]
+  /// Phase 2: relational per-country availability + optional price/currency
+  /// override (replaces the Phase 1 `countries String[]` column).
+  countryAvailability ProductCountry[]
+  /// Phase 2: secondary/additional category tagging (many-to-many).
+  categories          ProductCategory[]
+
+  @@index([categoryId])
+  @@index([supplierId])
+  @@index([source])
+}
+
+/// Phase 2 addition: the real relational country-availability mechanism.
+/// One row per (product, country) — drives the country product rule
+/// engine in packages/marketplace-country together with CountryConfig's
+/// restrictedCategorySlugs. `price`/`currency` are per-country overrides;
+/// null means "use Product.basePrice/baseCurrency".
+model ProductCountry {
+  id          String   @id @default(cuid())
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  countryCode String
+  isAvailable Boolean  @default(true)
+  price       Decimal? @db.Decimal(12, 2)
+  currency    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([productId, countryCode])
+  @@index([countryCode])
+}
+
+/// Phase 2 addition: many-to-many secondary categorization. Product.categoryId
+/// remains the single "primary" category (unchanged from Phase 1); this join
+/// table lets a product also appear under additional categories (e.g. a
+/// "smart watch" tagged both Electronics and Sports & Outdoors) without
+/// giving up the simple primary-category relation most queries use.
+model ProductCategory {
+  id         String   @id @default(cuid())
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([productId, categoryId])
+  @@index([categoryId])
+}
+
+model ProductImage {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String
+  altText   String?
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([productId])
+}
+
+model ProductVariant {
+  id         String      @id @default(cuid())
+  productId  String
+  product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sku        String      @unique
+  name       String
+  price      Decimal     @db.Decimal(12, 2)
+  currency   String      @default("USD")
+  stock      Int         @default(0)
+  /// e.g. {"color":"red","size":"M"}
+  attributes Json?
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  /// Phase 2 addition: per-country warehouse stock (replaces the flat
+  /// `stock` column as the source of truth once populated; `stock` is kept
+  /// as a simple non-country-specific fallback for variants with no
+  /// Inventory rows yet).
+  inventory  Inventory[]
+
+  @@index([productId])
+}
+
+/// Phase 2 addition: per-variant, per-country warehouse inventory. Backs
+/// `MarketplaceProvider.getAvailability()`. One row per (variant, country).
+model Inventory {
+  id               String         @id @default(cuid())
+  productVariantId String
+  variant          ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+  countryCode      String
+  quantity         Int            @default(0)
+  reservedQuantity Int            @default(0)
+  updatedAt        DateTime       @updatedAt
+
+  @@unique([productVariantId, countryCode])
+  @@index([countryCode])
+}
+
+/// Supplier registration/portal. Phase 1 models the entity; the
+/// registration UI/portal flows are later-phase scope (see DEBT.md).
+model Supplier {
+  id           String         @id @default(cuid())
+  userId       String         @unique
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyName  String
+  countryCode  String
+  contactEmail String
+  contactPhone String?
+  status       SupplierStatus @default(PENDING)
+  /// Whether a CJ Dropshipping account is linked. The actual
+  /// CJDropshippingProvider adapter is later-phase scope (see DEBT.md) —
+  /// this column only tracks link state.
+  cjApiLinked  Boolean        @default(false)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  products     Product[]
+
+  @@index([countryCode])
+  @@index([status])
+}
+
+/// Affiliate registration/dashboard. Phase 1 models the entity; commission
+/// calculation and attribution logic are later-phase scope (see DEBT.md).
+model Affiliate {
+  id             String          @id @default(cuid())
+  userId         String          @unique
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referralCode   String          @unique
+  countryCode    String
+  status         AffiliateStatus @default(PENDING)
+  /// Default commission rate as a fraction (0.05 = 5%). Real commission
+  /// calc/attribution engine is later-phase scope.
+  commissionRate Decimal         @default(0.05) @db.Decimal(5, 4)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([countryCode])
+  @@index([status])
+}

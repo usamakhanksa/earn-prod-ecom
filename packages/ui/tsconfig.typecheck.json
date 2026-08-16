@@ -1,0 +1,14 @@
+{
+  "extends": "@omnisell/config/tsconfig/tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "CommonJS",
+    "moduleResolution": "Node10",
+    "jsx": "react-jsx",
+    "declaration": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["src", "test"]
+}

@@ -1,0 +1,28 @@
+{
+  "name": "@marketplace/country",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@marketplace/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@marketplace/config": "workspace:*",
+    "typescript": "5.5.4",
+    "vitest": "2.1.3"
+  }
+}

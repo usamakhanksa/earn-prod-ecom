@@ -1,0 +1,19 @@
+@import '@omnisell/ui/tokens.css';
+
+/* Admin shell — distinct dark chrome + red accent (featureslist.md §0.2). */
+[data-shell='admin'] {
+  --brand-600: #c81e3a;
+  --brand-500: #e0364f;
+  --brand-400: #f05a70;
+  --brand-soft: #2a1520;
+  --surface-0: #14151a;
+  --surface-1: #1b1d24;
+  --surface-2: #252833;
+  --text-primary: #eceef4;
+  --text-secondary: #9aa1b2;
+  --border-subtle: #33363f;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

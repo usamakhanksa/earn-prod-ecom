@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "GlobalMart",
+    "slug": "globalmart-mobile",
+    "scheme": "globalmart",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "platforms": ["ios", "android", "web"],
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}

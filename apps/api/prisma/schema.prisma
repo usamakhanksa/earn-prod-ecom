@@ -1,0 +1,2861 @@
+// OmniSell OS — Prisma schema (PostgreSQL 16 + RLS).
+// Base data model per prompt.md; consumer points tables per docs/points-extension.md §6.
+// Conventions: id = cuid2, tenant-scoped tables carry indexed tenantId, RLS at infra/db/rls.sql.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Identity & tenancy (Phase 1)
+// ---------------------------------------------------------------------------
+
+model Tenant {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  name      String
+  currency  String   @default("USD") // ISO-4217
+  timezone  String   @default("UTC")
+  plan      String   @default("free")
+  // Phase 6 addition (task 6.8) — a KSA VAT-registered tenant's own seller
+  // VAT number, needed on every ZATCA invoice's `cac:PartyTaxScheme/
+  // cbc:CompanyID`. Optional/additive: nothing before this phase set it.
+  vatNumber String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  memberships            Membership[]
+  apiKeys                ApiKey[]
+  featureFlagTargets     FeatureFlagTarget[]
+  auditLogs              AuditLog[]
+  wallets                Wallet[]
+  pointTransactions      PointTransaction[]
+  pointEarningRules      PointEarningRule[]
+  pointSettings          TenantPointSettings?
+  videoContents          VideoContent[]
+  videoWatches           VideoWatch[]
+  pointRedemptions       ProductPurchaseWithPoints[]
+  products               Product[]
+  invites                Invite[]
+  notifications          Notification[]
+  notificationPreferences NotificationPreference[]
+
+  // Phase 2 — Studio & Catalog
+  folders             Folder[]
+  assets              Asset[]
+  assetVersions       AssetVersion[]
+  assetUploadSessions AssetUploadSession[]
+  preflightReports    PreflightReport[]
+  collections         Collection[]
+  collectionAssets    CollectionAsset[]
+  blueprints          Blueprint[]
+  blueprintVariants   BlueprintVariant[]
+  productVariants     ProductVariant[]
+  variantPrices       VariantPrice[]
+  designPlacements    DesignPlacement[]
+  placementTemplates  PlacementTemplate[]
+  pricingRules        PricingRule[]
+  mockupTemplates     MockupTemplate[]
+  mockupRenders       MockupRender[]
+
+  // Phase 3 — Connector Framework
+  tenantDataKey        TenantDataKey?
+  connections          Connection[]
+  credentials          Credential[]
+  connectorOAuthStates ConnectorOAuthState[]
+  connectionHealthSamples ConnectionHealthSample[]
+
+  // Phase 4 — Publishing Pipeline & Export Packs
+  listings              Listing[]
+  listingVariants       ListingVariant[]
+  listingFieldOverrides ListingFieldOverride[]
+  listingEvents         ListingEvent[]
+  syncJobs              SyncJob[]
+  syncJobItems          SyncJobItem[]
+  exportPacks           ExportPack[]
+  exportPackItems       ExportPackItem[]
+
+  // Phase 4.5 — minimal ledger primitive (redemption discount postings)
+  ledgerEntries LedgerEntry[]
+  ledgerLines   LedgerLine[]
+
+  // Phase 5 — Orders, Fulfilment & Digital Delivery
+  orders                 Order[]
+  orderItems             OrderItem[]
+  orderWebhookEvents     OrderWebhookEvent[]
+  orderPollCursors       OrderPollCursor[]
+  orderFees              OrderFee[]
+  orderExceptions        OrderException[]
+  orderEvents            OrderEvent[]
+  fulfilmentRoutingRules FulfilmentRoutingRule[]
+  fulfilments            Fulfilment[]
+  shipments              Shipment[]
+  trackingEvents         TrackingEvent[]
+  returns                Return[]
+  refunds                Refund[]
+  reprints               Reprint[]
+  savedOrderViews        SavedOrderView[]
+  buyerMessageTemplates  BuyerMessageTemplate[]
+  buyerMessageLogs       BuyerMessageLog[]
+  digitalProducts        DigitalProduct[]
+  digitalFiles           DigitalFile[]
+  digitalFileVersions    DigitalFileVersion[]
+  entitlements           Entitlement[]
+  deliveryTokens         DeliveryToken[]
+  deliveryLogs           DeliveryLog[]
+  licenceKeys            LicenceKey[]
+  licenceKeyActivations  LicenceKeyActivation[]
+  coupons                Coupon[]
+  couponRedemptions      CouponRedemption[]
+
+  // Phase 6 — Finance, Ledger & Tax
+  expenses          Expense[]
+  financePayouts    FinancePayout[]
+  financePayoutLines FinancePayoutLine[]
+  invoices          Invoice[]
+  invoiceLines      InvoiceLine[]
+  zatcaInvoiceMetas ZatcaInvoiceMeta[]
+  taxNexuses        TaxNexus[]
+  periodLocks       PeriodLock[]
+  financeDisputes   FinanceDispute[]
+  subscription      Subscription?
+  usageRecords      UsageRecord[]
+  aiCreditLedgers   AiCreditLedger[]
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String
+  name          String?
+  locale        String    @default("en")
+  emailVerifiedAt DateTime?
+  isPlatformAdmin Boolean   @default(false) // minimal admin-role extension (task 1.8) — no separate AdminUser model yet
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  memberships      Membership[]
+  sessions         Session[]
+  mfaSecrets       MfaSecret[]
+  mfaRecoveryCodes MfaRecoveryCode[]
+  oauthAccounts    OAuthAccount[]
+  emailVerificationTokens EmailVerificationToken[]
+  passwordResetTokens     PasswordResetToken[]
+  wallets          Wallet[]
+  pointTransactions PointTransaction[]
+  videoWatches     VideoWatch[]
+  pointRedemptions ProductPurchaseWithPoints[]
+  auditLogs        AuditLog[]
+  invitesSent      Invite[]                  @relation("InviteInvitedBy")
+  invitesAccepted  Invite[]                  @relation("InviteAcceptedBy")
+  notifications    Notification[]
+  notificationPreferences NotificationPreference[]
+
+  // Phase 5 — Orders, Fulfilment & Digital Delivery
+  savedOrderViews       SavedOrderView[]
+  entitlements          Entitlement[]
+
+  // Global marketplace extension (ecom-front.txt)
+  suppliers          Supplier[]
+  affiliates         Affiliate[]
+  taskCompletions    TaskCompletion[]
+  offerCompletions   OfferCompletion[]
+  payouts            Payout[]
+  referralsSent      Referral[] @relation("ReferralReferrer")
+  referralsReceived  Referral[] @relation("ReferralReferred")
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String
+  role      String   // OrgRole: OWNER | ADMIN | DESIGNER | FINANCE | ANALYST | SUPPORT | MEMBER
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([tenantId, userId])
+  @@index([userId])
+  @@index([tenantId])
+}
+
+model Session {
+  id               String    @id @default(cuid())
+  userId           String
+  refreshTokenHash String    @unique
+  deviceId         String?
+  ipAddress        String?
+  userAgent        String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model MfaSecret {
+  id        String    @id @default(cuid())
+  userId    String    @unique
+  secret    String // TOTP base32 secret. TODO(1-D9): envelope-encrypt at rest via KMS_MASTER_KEY like Credential — stored as plaintext column for this pass, tracked in docs/DEBT.md.
+  enabled   Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+// 10 single-use recovery codes issued when MFA is activated (prompt.md Phase 1.3).
+model MfaRecoveryCode {
+  id        String    @id @default(cuid())
+  userId    String
+  codeHash  String // sha256, never stored plaintext
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+// Linked OAuth identity (prompt.md Phase 1.3 — Google/Apple). Populated only once
+// real provider credentials are configured (docs/DEBT.md 1-D2); the schema is ready
+// ahead of that so account-linking doesn't require a second migration.
+model OAuthAccount {
+  id                String   @id @default(cuid())
+  userId            String
+  provider          String // OAuthProvider: GOOGLE | APPLE
+  providerAccountId String
+  email             String?
+  createdAt         DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model EmailVerificationToken {
+  id          String    @id @default(cuid())
+  userId      String
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id          String    @id @default(cuid())
+  userId      String
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  tenantId   String
+  name       String
+  keyHash    String    @unique // sha256 of the live key (never the key itself)
+  scopes     Json
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+}
+
+model FeatureFlag {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  description String?
+  isEnabled   Boolean  @default(false)
+  rolloutPct  Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  targets FeatureFlagTarget[]
+}
+
+model FeatureFlagTarget {
+  id        String   @id @default(cuid())
+  flagId    String
+  tenantId  String
+  isEnabled Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  flag   FeatureFlag @relation(fields: [flagId], references: [id])
+  tenant Tenant      @relation(fields: [tenantId], references: [id])
+
+  @@unique([flagId, tenantId])
+}
+
+model AuditLog {
+  id         String    @id @default(cuid())
+  tenantId   String?
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String?
+  before     Json?
+  after      Json?
+  ipAddress  String?
+  createdAt  DateTime  @default(now())
+
+  actor  User?   @relation(fields: [actorId], references: [id])
+  tenant Tenant? @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@index([entityType, entityId])
+}
+
+// Generic idempotency store (prompt.md constraint #5). `ownerId` is always
+// populated (tenantId, userId, or the literal "global") so the unique index
+// holds even for tenant-less callers — Postgres treats NULL as distinct from
+// NULL, which would silently defeat a nullable-column unique constraint.
+model IdempotencyRecord {
+  id           String   @id @default(cuid())
+  scope        String // e.g. "invite.create", "mfa.verify", "feature-flag.create"
+  key          String // caller-supplied Idempotency-Key header
+  ownerId      String
+  requestHash  String // sha256 of the normalised request body
+  responseJson Json
+  statusCode   Int      @default(200)
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+
+  @@unique([scope, key, ownerId])
+  @@index([expiresAt])
+}
+
+// Org invite (prompt.md Phase 1.6 / featureslist.md 1.10 — pending/expired
+// management). Acceptance requires an existing account with a matching email
+// (docs/OPEN_QUESTIONS.md #16 — conservative default, no anonymous account
+// auto-provisioning from a bare token in this pass).
+model Invite {
+  id               String    @id @default(cuid())
+  tenantId         String
+  email            String
+  role             String // OrgRole
+  tokenHash        String    @unique
+  status           String    @default("PENDING") // InviteStatus: PENDING | ACCEPTED | REVOKED | EXPIRED
+  invitedById      String
+  acceptedByUserId String?
+  expiresAt        DateTime
+  acceptedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  tenant     Tenant @relation(fields: [tenantId], references: [id])
+  invitedBy  User   @relation("InviteInvitedBy", fields: [invitedById], references: [id])
+  acceptedBy User?  @relation("InviteAcceptedBy", fields: [acceptedByUserId], references: [id])
+
+  @@index([tenantId, status])
+  @@index([tenantId, email])
+}
+
+// In-app notification centre skeleton (prompt.md Phase 1.12). Realtime
+// push/SSE delivery is out of scope for this pass — see docs/DEBT.md.
+model Notification {
+  id        String    @id @default(cuid())
+  tenantId  String
+  userId    String
+  type      String // NotificationType: SECURITY | TEAM | BILLING | SYSTEM
+  title     String
+  body      String
+  data      Json?
+  channel   String    @default("IN_APP") // NotificationChannel
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, userId, createdAt])
+  @@index([userId, readAt])
+}
+
+model NotificationPreference {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String
+  type      String // NotificationType
+  inApp     Boolean  @default(true)
+  email     Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([tenantId, userId, type])
+  @@index([tenantId, userId])
+}
+
+// ---------------------------------------------------------------------------
+// Connectors (spine — prompt.md)
+// ---------------------------------------------------------------------------
+
+// `ConnectorDefinition`/`ConnectorVersion` are the deliberate GLOBAL exception
+// to "every tenant-scoped table carries tenantId" (prompt.md's explicit
+// "Global (non-tenant)" list). Rationale: the registry — which platforms
+// exist, their tier/capabilities/docs — is a platform-wide catalog fact every
+// tenant reads identically, not tenant data; a tenant's OWN relationship to a
+// connector (its credentials, its health samples) is `Connection`/`Credential`
+// below, which ARE tenant-scoped. Same pattern as `FeatureFlag` (global
+// definition) vs `FeatureFlagTarget` (tenant-scoped override).
+model ConnectorDefinition {
+  id                      String   @id @default(cuid())
+  slug                    String   @unique
+  name                    String
+  category                String // CONNECTOR_CATEGORIES: POD | DIGITAL | ECOM | GIG | RESEARCH | PAYMENT
+  tier                    String // CONNECTOR_TIERS: A | B | C | D
+  status                  String   @default("ACTIVE")
+  authType                String // AUTH_TYPES
+  apiDocsUrl              String?
+  tosUrl                  String?
+  verifiedAt              DateTime?
+  verifiedBy              String?
+  requiresPartnerApproval Boolean  @default(false)
+  rateLimit               Json // ConnectorRateLimitConfig
+  capabilities            Json // ConnectorCapabilities — canAutomate:false is the Tier C compile-time boundary's data-side mirror
+  fieldSpec               Json? // ConnectorFieldSpec
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  versions    ConnectorVersion[]
+  connections Connection[]
+}
+
+// Connector version pinning + deprecation notices (featureslist.md 4.14).
+// Global, same reasoning as ConnectorDefinition above — an adapter's version
+// history is a platform fact, not tenant data.
+model ConnectorVersion {
+  id            String    @id @default(cuid())
+  connectorId   String
+  version       String // e.g. "2026.08.0" — this pass ships exactly one row per connector, "1.0.0"
+  releaseNotes  String?
+  isCurrent     Boolean   @default(true)
+  deprecatedAt  DateTime?
+  createdAt     DateTime  @default(now())
+
+  connector ConnectorDefinition @relation(fields: [connectorId], references: [id])
+
+  @@unique([connectorId, version])
+  @@index([connectorId, isCurrent])
+}
+
+// Per-tenant Data Encryption Key, envelope-encrypted by KMS_MASTER_KEY
+// (prompt.md constraint #3 / implentationplanphase.md task 3.2). Exactly one
+// active row per tenant; rotation re-wraps `wrappedDek` under a new master
+// key WITHOUT touching any Credential row (packages/connectors/src/vault).
+model TenantDataKey {
+  id           String    @id @default(cuid())
+  tenantId     String    @unique
+  wrappedDek   String // base64(iv || authTag || ciphertext) — the DEK itself, wrapped
+  kmsKeyId     String // which KMS_MASTER_KEY version wrapped this (rotation audit trail)
+  createdAt    DateTime  @default(now())
+  rotatedAt    DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+}
+
+// A tenant's link to one ConnectorDefinition instance (featureslist.md §4 —
+// Connections). `status`/`sandbox`/`scopesGranted` reflect the last real test
+// call; the actual secret never lives here — see Credential below.
+model Connection {
+  id                   String    @id @default(cuid())
+  tenantId             String
+  connectorId          String
+  connectorSlug        String // denormalised for fast display without a join — mirrors connectorId's ConnectorDefinition.slug at creation time
+  label                String
+  status               String    @default("PENDING") // CONNECTION_STATUSES: PENDING | CONNECTED | ERROR | DISCONNECTED
+  authType             String // AUTH_TYPES — mirrors ConnectorDefinition.authType at creation time
+  sandbox              Boolean   @default(false)
+  externalAccountId    String? // e.g. Printify shop_id, Gelato storeId — resolved on first successful test call
+  externalAccountLabel String?
+  scopesGranted        Json? // string[] — OAuth scopes actually granted, or [] for API key/PAT
+  lastTestedAt         DateTime?
+  lastSuccessAt        DateTime?
+  createdById          String
+  disconnectedAt       DateTime?
+  retentionChoice      String? // RETENTION_CHOICES, set at disconnect time
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  tenant       Tenant                  @relation(fields: [tenantId], references: [id])
+  connector    ConnectorDefinition     @relation(fields: [connectorId], references: [id])
+  credentials  Credential[]
+  healthSamples ConnectionHealthSample[]
+  oauthStates  ConnectorOAuthState[]
+  listings     Listing[]
+  exportPacks  ExportPack[]
+  orders       Order[]
+  fulfilments  Fulfilment[]
+  orderPollCursor OrderPollCursor?
+  financePayouts  FinancePayout[]
+
+  @@index([tenantId, connectorSlug])
+  @@index([tenantId, status])
+}
+
+// Envelope-encrypted credential (prompt.md constraint #3). `encryptedBlob` is
+// ciphertext ONLY — ALWAYS produced by packages/connectors/src/vault/envelope
+// under the owning Connection's tenant's DEK, NEVER logged, NEVER returned by
+// any API response (only `maskedHint` is). Multiple rows per Connection let
+// rotation keep an audit history (`isActive` marks the current one).
+model Credential {
+  id             String    @id @default(cuid())
+  tenantId       String
+  connectionId   String
+  kind           String // CREDENTIAL_KINDS: OAUTH2 | API_KEY | PAT | HMAC_PAIR | NONE
+  encryptedBlob  String // base64(iv || authTag || ciphertext) of the primary secret
+  encryptedSecondaryBlob String? // Prodigi-style separate sandbox/live key pair
+  dekTenantKeyId String // TenantDataKey.id used to encrypt this row — supports key rotation audit
+  maskedHint     String? // e.g. "sk_live_••••4821" — the ONLY human-readable trace of the secret
+  scopes         Json? // string[] granted OAuth scopes, snapshot at issuance
+  expiresAt      DateTime? // OAuth access-token expiry, null for API_KEY/PAT
+  isActive       Boolean   @default(true)
+  rotatedAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id])
+  connection Connection @relation(fields: [connectionId], references: [id])
+
+  @@index([tenantId, connectionId, isActive])
+  @@index([expiresAt])
+}
+
+// Ephemeral OAuth 2.0 + PKCE handshake state (implentationplanphase.md task
+// 3.3 — "state validation and callback allowlist"). One row per in-flight
+// authorization; consumed (and expired) rows are rejected on callback replay.
+model ConnectorOAuthState {
+  id            String    @id @default(cuid())
+  tenantId      String
+  connectionId  String
+  connectorSlug String
+  state         String    @unique
+  codeVerifier  String // PKCE code_verifier — plaintext is fine, it is single-use and short-lived, never a durable secret
+  redirectUri   String
+  createdAt     DateTime  @default(now())
+  expiresAt     DateTime
+  consumedAt    DateTime?
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id])
+  connection Connection @relation(fields: [connectionId], references: [id])
+
+  @@index([tenantId, connectorSlug])
+  @@index([expiresAt])
+}
+
+// Connection health board data (featureslist.md 4.9). One row per health
+// check / real call outcome; the board (apps/web Channels → Connection
+// Health) aggregates a window of these into error-rate/latency/rate-limit
+// readouts.
+model ConnectionHealthSample {
+  id                  String    @id @default(cuid())
+  tenantId            String
+  connectionId        String
+  checkedAt           DateTime  @default(now())
+  success             Boolean
+  latencyMs           Int?
+  errorCode           String? // ConnectorErrorCode
+  errorMessage        String?
+  rateLimitRemaining  Int?
+  rateLimitResetAt    DateTime?
+  isSeedData          Boolean   @default(false) // true only for demo-tenant rows seeded for this phase's UI demo (docs/DEBT.md)
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id])
+  connection Connection @relation(fields: [connectionId], references: [id])
+
+  @@index([tenantId, connectionId, checkedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Studio — Assets, AI & Mockups (Phase 2 §2 / implentationplanphase.md tasks 2.1-2.5)
+// ---------------------------------------------------------------------------
+
+// Simple containment hierarchy (featureslist.md 2.5). Collections (below) are the
+// cross-cutting, many-to-many grouping; a Folder is a single-parent location.
+model Folder {
+  id        String    @id @default(cuid())
+  tenantId  String
+  name      String
+  parentId  String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id])
+  parent   Folder?  @relation("FolderChildren", fields: [parentId], references: [id])
+  children Folder[] @relation("FolderChildren")
+  assets   Asset[]
+
+  @@index([tenantId, parentId])
+}
+
+model Asset {
+  id              String    @id @default(cuid())
+  tenantId        String
+  folderId        String?
+  name            String
+  kind            String // AssetKind: IMAGE | VECTOR | DOCUMENT
+  mimeType        String
+  sizeBytes       Int
+  storageKey      String // S3-compatible object key (real key shape; MinIO unreachable in this sandbox — docs/DEBT.md)
+  previewKey      String?
+  thumbnailKey    String?
+  widthPx         Int?
+  heightPx        Int?
+  dpi             Int?
+  colorProfile    String? // AssetColorProfile: RGB | CMYK | UNKNOWN
+  hasTransparency Boolean?
+  minStrokeWidthPx Float?  // optional vector metadata — preflight's stroke-width rule reports "skipped" without it
+  checksum        String?
+  status          String    @default("UPLOADING") // AssetStatus: UPLOADING | PROCESSING | READY | FAILED
+  starred         Boolean   @default(false)
+  colorLabel      String? // AssetColorLabel: RED|ORANGE|YELLOW|GREEN|BLUE|PURPLE|GREY
+  tags            String[]  @default([])
+  currentVersion  Int       @default(1)
+  createdById     String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  tenant              Tenant             @relation(fields: [tenantId], references: [id])
+  folder              Folder?            @relation(fields: [folderId], references: [id])
+  versions            AssetVersion[]
+  uploadSessions      AssetUploadSession[]
+  collectionLinks     CollectionAsset[]
+  preflightReports    PreflightReport[]
+  placements          DesignPlacement[]
+  mockupRenders       MockupRender[]
+  primaryForProducts  Product[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, folderId])
+  @@index([tenantId, starred])
+}
+
+// Asset versioning with rollback (featureslist.md 2.4). `Asset.currentVersion`
+// always mirrors the highest non-superseded version; rollback creates a NEW
+// version row that copies an older version's storage key rather than mutating
+// history, so the version list is an honest append-only timeline.
+model AssetVersion {
+  id            String   @id @default(cuid())
+  assetId       String
+  tenantId      String
+  versionNumber Int
+  storageKey    String
+  previewKey    String?
+  sizeBytes     Int
+  mimeType      String
+  widthPx       Int?
+  heightPx      Int?
+  dpi           Int?
+  checksum      String?
+  note          String? // e.g. "Rolled back to v2"
+  createdById   String
+  createdAt     DateTime @default(now())
+
+  asset  Asset  @relation(fields: [assetId], references: [id])
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([assetId, versionNumber])
+  @@index([tenantId])
+}
+
+// Resumable-upload session (featureslist.md 2.2 — tus protocol). Scoped down
+// per this phase's environment constraints (docs/DEBT.md): tracks byte offset
+// like a real tus server would, but the chunk bytes land on local scratch
+// storage rather than S3 multipart — see AssetUploadService's doc comment.
+model AssetUploadSession {
+  id            String    @id @default(cuid())
+  tenantId      String
+  assetId       String?
+  filename      String
+  mimeType      String
+  totalBytes    Int
+  receivedBytes Int       @default(0)
+  storageKey    String
+  status        String    @default("OPEN") // UploadSessionStatus: OPEN | COMPLETE | ABORTED
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  expiresAt     DateTime
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  asset  Asset? @relation(fields: [assetId], references: [id])
+
+  @@index([tenantId, status])
+}
+
+// Print-file preflight engine output (featureslist.md 2.7 / DoD task 2.4) —
+// one immutable report per run so the asset UI can show report history.
+model PreflightReport {
+  id            String   @id @default(cuid())
+  tenantId      String
+  assetId       String
+  blueprintId   String?
+  placementCode String?
+  overallStatus String // PreflightStatus: PASS | WARN | FAIL
+  rules         Json // PreflightRuleResult[] — {rule,status,messageKey,params,details}
+  createdAt     DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  asset  Asset  @relation(fields: [assetId], references: [id])
+
+  @@index([tenantId, assetId, createdAt])
+}
+
+model Collection {
+  id          String    @id @default(cuid())
+  tenantId    String
+  name        String
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  tenant Tenant            @relation(fields: [tenantId], references: [id])
+  assets CollectionAsset[]
+
+  @@index([tenantId])
+}
+
+model CollectionAsset {
+  id           String   @id @default(cuid())
+  collectionId String
+  assetId      String
+  tenantId     String
+  addedAt      DateTime @default(now())
+
+  collection Collection @relation(fields: [collectionId], references: [id])
+  asset      Asset      @relation(fields: [assetId], references: [id])
+  tenant     Tenant     @relation(fields: [tenantId], references: [id])
+
+  @@unique([collectionId, assetId])
+  @@index([tenantId])
+}
+
+// Mockup generator (featureslist.md 2.9). Template registry per blueprint +
+// placement; batch/async rendering needs BullMQ/Redis (unavailable this
+// phase, docs/DEBT.md) — MockupRender rows exist so the sync compositing path
+// (apps/api/src/studio/mockups) has somewhere real to write status, and so the
+// async path has a seam to land on without a second migration later.
+model MockupTemplate {
+  id              String   @id @default(cuid())
+  tenantId        String
+  blueprintId     String?
+  placementCode   String
+  name            String
+  sceneKey        String // storageKey of the base scene (flat-lay/model photo)
+  sceneWidthPx    Int
+  sceneHeightPx   Int
+  printAreaX      Int
+  printAreaY      Int
+  printAreaWidth  Int
+  printAreaHeight Int
+  rotationDeg     Float    @default(0)
+  colorway        String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant  Tenant         @relation(fields: [tenantId], references: [id])
+  renders MockupRender[]
+
+  @@index([tenantId])
+}
+
+model MockupRender {
+  id           String    @id @default(cuid())
+  tenantId     String
+  templateId   String
+  assetId      String
+  outputKey    String?
+  status       String    @default("PENDING") // MockupRenderStatus: PENDING | PROCESSING | READY | FAILED
+  errorMessage String?
+  createdAt    DateTime  @default(now())
+  completedAt  DateTime?
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id])
+  template MockupTemplate @relation(fields: [templateId], references: [id])
+  asset    Asset          @relation(fields: [assetId], references: [id])
+
+  @@index([tenantId, status])
+}
+
+// ---------------------------------------------------------------------------
+// Catalog (Phase 2 §3 / implentationplanphase.md tasks 2.6-2.12)
+// ---------------------------------------------------------------------------
+
+// Provider catalog CACHE (prompt.md data model: "Blueprint (provider catalog
+// cache)"). Tenant-scoped per prompt.md's tree placement under Tenant — see
+// docs/OPEN_QUESTIONS.md for the reasoning. No live connector sync exists yet
+// (docs/DEBT.md 0-D8, Phase 3 scope) — rows are hand-seeded this phase.
+model Blueprint {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  providerSlug        String // e.g. "printful" — the eventual connector this cache mirrors
+  providerBlueprintId String
+  name                String
+  category            String // e.g. APPAREL | DRINKWARE | WALL_ART
+  printAreas          Json // PrintAreaSpec[] — {code,name,widthIn,heightIn,dpiMin,dpiRecommended,bleedIn,safeAreaIn,allowsTransparency,colorProfile}
+  sizes               Json // string[]
+  colors              Json // {name,hex}[]
+  isActive            Boolean  @default(true)
+  syncedAt            DateTime @default(now())
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  tenant   Tenant             @relation(fields: [tenantId], references: [id])
+  variants BlueprintVariant[]
+  products Product[]
+
+  @@unique([tenantId, providerSlug, providerBlueprintId])
+  @@index([tenantId, isActive])
+}
+
+model BlueprintVariant {
+  id                String   @id @default(cuid())
+  blueprintId       String
+  tenantId          String
+  providerVariantId String
+  size              String
+  color             String
+  colorHex          String?
+  sku               String?
+  baseCostMinor     BigInt
+  currency          String   @default("USD")
+  inStock           Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  blueprint       Blueprint        @relation(fields: [blueprintId], references: [id])
+  tenant          Tenant           @relation(fields: [tenantId], references: [id])
+  productVariants ProductVariant[]
+
+  @@unique([blueprintId, providerVariantId])
+  @@index([tenantId])
+}
+
+// Product master record (featureslist.md 3.1) — internal SKU, decoupled from
+// any channel listing (Listing lands in Phase 4). Extended this phase from the
+// Phase 0 stub; `priceMinor`/`currency` stay as a legacy default price so
+// Phase 4.5's `ProductPurchaseWithPoints` keeps working unchanged — real
+// per-variant/per-channel pricing now lives on VariantPrice.
+model Product {
+  id             String    @id @default(cuid())
+  tenantId       String
+  name           String
+  description    String?
+  sku            String
+  status         String    @default("DRAFT") // ProductStatus: DRAFT | ACTIVE | ARCHIVED
+  blueprintId    String?
+  primaryAssetId String?
+  priceMinor     BigInt // legacy default price — money is integers, minor units
+  currency       String    @default("USD")
+  isActive       Boolean   @default(true)
+  archivedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  tenant           Tenant                      @relation(fields: [tenantId], references: [id])
+  blueprint        Blueprint?                  @relation(fields: [blueprintId], references: [id])
+  primaryAsset     Asset?                      @relation(fields: [primaryAssetId], references: [id])
+  variants         ProductVariant[]
+  placements       DesignPlacement[]
+  pointRedemptions ProductPurchaseWithPoints[]
+  listings         Listing[]
+  digitalProducts  DigitalProduct[]
+
+  @@unique([tenantId, sku])
+  @@index([tenantId])
+  @@index([tenantId, status])
+}
+
+// Variant matrix builder (featureslist.md 3.3) — one row per size × colour
+// combination generated from a Blueprint, with bulk enable/disable and
+// per-variant overrides.
+model ProductVariant {
+  id                 String   @id @default(cuid())
+  tenantId           String
+  productId          String
+  blueprintVariantId String?
+  sku                String
+  size               String?
+  color              String?
+  attributes         Json?
+  isEnabled          Boolean  @default(true)
+  baseCostMinor      BigInt   @default(0)
+  currency           String   @default("USD")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id])
+  product          Product           @relation(fields: [productId], references: [id])
+  blueprintVariant BlueprintVariant? @relation(fields: [blueprintVariantId], references: [id])
+  prices           VariantPrice[]
+  listingVariants  ListingVariant[]
+  orderItems       OrderItem[]
+
+  @@unique([productId, sku])
+  @@index([tenantId, productId])
+}
+
+// Computed/stored price per variant × channel × currency (featureslist.md
+// 3.6/3.7) — a PricingRule's output is always persisted here, never
+// recomputed-and-discarded, so "no computed total without stored components"
+// (prompt.md constraint #6) holds for prices too.
+model VariantPrice {
+  id             String   @id @default(cuid())
+  tenantId       String
+  variantId      String
+  channel        String   @default("default")
+  currency       String
+  priceMinor     BigInt
+  compareAtMinor BigInt?
+  marginPct      Float?
+  pricingRuleId  String?
+  computedAt     DateTime @default(now())
+
+  tenant      Tenant          @relation(fields: [tenantId], references: [id])
+  variant     ProductVariant  @relation(fields: [variantId], references: [id])
+  pricingRule PricingRule?    @relation(fields: [pricingRuleId], references: [id])
+
+  @@unique([variantId, channel, currency])
+  @@index([tenantId])
+}
+
+// Design→placement mapping (featureslist.md 3.4/3.5) — position/scale/rotation
+// per print area, one placement per (product, placementCode).
+model DesignPlacement {
+  id            String   @id @default(cuid())
+  tenantId      String
+  productId     String
+  assetId       String
+  placementCode String // PlacementCode: FRONT | BACK | SLEEVE_LEFT | SLEEVE_RIGHT | INNER_LABEL | ALL_OVER
+  xPct          Float // normalised 0-1 position within the print area
+  yPct          Float
+  scalePct      Float    @default(100)
+  rotationDeg   Float    @default(0)
+  templateId    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant   Tenant              @relation(fields: [tenantId], references: [id])
+  product  Product             @relation(fields: [productId], references: [id])
+  asset    Asset               @relation(fields: [assetId], references: [id])
+  template PlacementTemplate?  @relation(fields: [templateId], references: [id])
+
+  @@unique([productId, placementCode])
+  @@index([tenantId])
+}
+
+// Reusable placement template (featureslist.md 3.5 — "saved as reusable
+// template"). `items` mirrors DesignPlacement's position fields per code.
+model PlacementTemplate {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String
+  blueprintId String?
+  items       Json // {placementCode,xPct,yPct,scalePct,rotationDeg}[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant     Tenant            @relation(fields: [tenantId], references: [id])
+  placements DesignPlacement[]
+
+  @@index([tenantId])
+}
+
+// Pricing rules engine (featureslist.md 3.6) — cost-plus %, fixed margin,
+// target price, psychological rounding, per-channel multiplier, per-currency
+// floor. Pure computation lives in apps/api/src/catalog/pricing/pricing.engine.ts;
+// this row is the persisted configuration a VariantPrice was computed from.
+model PricingRule {
+  id                 String   @id @default(cuid())
+  tenantId           String
+  name               String
+  method             String // PricingMethod: COST_PLUS_PERCENT | FIXED_MARGIN | TARGET_PRICE
+  costPlusPct        Float?
+  fixedMarginPct     Float?
+  targetPriceMinor   BigInt?
+  roundingMode       String   @default("NONE") // RoundingMode: NONE | PSYCHOLOGICAL_99 | NEAREST_INTEGER | NEAREST_5
+  channelMultipliers Json? // { [channelSlug]: number }
+  currencyFloors     Json? // { [currency]: string minor-unit floor }
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id])
+  variantPrices VariantPrice[]
+
+  @@index([tenantId, isActive])
+}
+
+// Minimal FX rate cache (featureslist.md 2.10's "keep proportionate" note —
+// full ingestion is Phase 6/Finance scope, docs/DEBT.md). Global, not tenant-
+// scoped: an exchange rate is a market fact, not tenant data. `rate` is a
+// ratio, not a money amount, so it is the one legitimate float in this schema
+// (prompt.md constraint #6 governs money amounts, which stay integer minor
+// units everywhere they are produced from this rate).
+model FxRate {
+  id            String   @id @default(cuid())
+  baseCurrency  String
+  quoteCurrency String
+  rate          Float
+  asOf          DateTime
+  source        String   @default("manual-seed")
+  createdAt     DateTime @default(now())
+
+  @@unique([baseCurrency, quoteCurrency, asOf])
+  @@index([baseCurrency, quoteCurrency])
+}
+
+// ---------------------------------------------------------------------------
+// Publishing Pipeline & Export Packs (Phase 4 / implentationplanphase.md
+// tasks 4.1-4.13, prompt.md data model: "Listing ─┬─ ListingVariant ├─
+// ListingFieldOverride └─ ListingEvent", "SyncJob ─── SyncJobItem",
+// "ExportPack ─── ExportPackItem").
+// ---------------------------------------------------------------------------
+
+// One row per (Product, Connection) — "multi-channel publish" (5.2) means N
+// Listing rows created together, one per selected channel, fanned out by a
+// single SyncJob. Status is the exact 6-value state machine from
+// implentationplanphase.md's Phase 4 entry; `approvalStatus` is deliberately
+// orthogonal — see docs/OPEN_QUESTIONS.md for why these are two fields, not
+// one enum, and how a Tier C listing's "confirm manual upload" step maps onto
+// only these six states.
+model Listing {
+  id                     String    @id @default(cuid())
+  tenantId               String
+  productId              String
+  connectionId           String
+  connectorSlug          String // denormalised, mirrors Connection.connectorSlug at creation time
+  title                  String
+  description            String    @default("")
+  tags                   String[]  @default([])
+  category               String?
+  status                 String    @default("DRAFT") // LISTING_STATUSES
+  approvalStatus         String    @default("NONE") // LISTING_APPROVAL_STATUSES
+  scheduledAt            DateTime? // stored in UTC always (4.9) — display/cutover resolved in scheduledTimezone
+  scheduledTimezone      String? // IANA tz, e.g. "Asia/Riyadh"
+  submittedForApprovalAt DateTime?
+  approvedAt             DateTime?
+  approvedById           String?
+  rejectedAt             DateTime?
+  rejectionReason        String?
+  lastError              String?
+  externalListingId      String? // set once a Tier A/B publish succeeds (e.g. Printful sync product id)
+  createdById            String
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  deletedAt              DateTime? // soft-delete (bulk "delete" action, 4.8) — every primary user-facing table carries this per prompt.md's data-model convention
+
+  tenant       Tenant                 @relation(fields: [tenantId], references: [id])
+  product      Product                @relation(fields: [productId], references: [id])
+  connection   Connection             @relation(fields: [connectionId], references: [id])
+  variants     ListingVariant[]
+  overrides    ListingFieldOverride[]
+  events       ListingEvent[]
+  syncJobItems SyncJobItem[]
+  exportPacks  ExportPack[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, productId])
+  @@index([tenantId, connectionId])
+  @@index([tenantId, scheduledAt])
+}
+
+// prompt.md: "ListingVariant (externalId, price, status)" — one row per
+// (Listing, ProductVariant); externalId is null until a Tier A/B publish
+// call actually returns one for that specific variant.
+model ListingVariant {
+  id               String   @id @default(cuid())
+  tenantId         String
+  listingId        String
+  productVariantId String
+  externalId       String?
+  priceMinor       BigInt
+  currency         String
+  status           String   @default("PENDING") // LISTING_VARIANT_STATUSES
+  lastError        String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  tenant         Tenant         @relation(fields: [tenantId], references: [id])
+  listing        Listing        @relation(fields: [listingId], references: [id])
+  productVariant ProductVariant @relation(fields: [productVariantId], references: [id])
+  orderItems     OrderItem[]
+
+  @@unique([listingId, productVariantId])
+  @@index([tenantId])
+}
+
+// A user-entered override that diverges from the canonical Listing field —
+// kept as its own append/replace table (rather than just overwriting
+// Listing.title etc.) so the composer can show "this field was customised
+// for this channel" and revert to the computed default later.
+model ListingFieldOverride {
+  id        String   @id @default(cuid())
+  tenantId  String
+  listingId String
+  fieldKey  String // "title" | "description" | "tags" | "category"
+  valueJson Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id])
+  listing Listing @relation(fields: [listingId], references: [id])
+
+  @@unique([listingId, fieldKey])
+  @@index([tenantId])
+}
+
+// Activity timeline (5.13) AND the approval comment thread (5.10) — a
+// comment is simply an event with `type: "COMMENT"`; no separate table.
+model ListingEvent {
+  id        String   @id @default(cuid())
+  tenantId  String
+  listingId String
+  type      String // LISTING_EVENT_TYPES
+  message   String
+  payload   Json?
+  actorId   String?
+  createdAt DateTime @default(now())
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id])
+  listing Listing @relation(fields: [listingId], references: [id])
+
+  @@index([tenantId, listingId, createdAt])
+}
+
+// One bulk/fan-out operation (4.5/4.8 — publish/unpublish/reprice/retag/
+// resync/delete). `PARTIAL` covers "3 of 4 channels succeeded" — the
+// signature-moment pipeline view's whole point.
+model SyncJob {
+  id             String    @id @default(cuid())
+  tenantId       String
+  kind           String // SYNC_JOB_KINDS
+  status         String    @default("PENDING") // SYNC_JOB_STATUSES
+  totalItems     Int       @default(0)
+  completedItems Int       @default(0)
+  failedItems    Int       @default(0)
+  createdById    String
+  createdAt      DateTime  @default(now())
+  completedAt    DateTime?
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id])
+  items  SyncJobItem[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, createdAt])
+}
+
+// prompt.md: "SyncJobItem (status, attempts, lastError, payloadHash)" — one
+// row per (Listing x channel) unit of work fanned out by a SyncJob; mirrors
+// the BullMQ job it drives (`queueJobId`) for one-click replay (4.7).
+model SyncJobItem {
+  id           String    @id @default(cuid())
+  tenantId     String
+  syncJobId    String
+  listingId    String
+  connectionId String?
+  status       String    @default("QUEUED") // SYNC_JOB_ITEM_STATUSES
+  attempts     Int       @default(0)
+  lastError    String?
+  payloadHash  String?
+  queueJobId   String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id])
+  syncJob SyncJob @relation(fields: [syncJobId], references: [id])
+  listing Listing @relation(fields: [listingId], references: [id])
+
+  @@index([tenantId, syncJobId])
+  @@index([tenantId, listingId])
+}
+
+// The Tier C deliverable (4.12) — a generated ZIP + its confirmation
+// tracker. `storageKey` is API-local scratch storage in this sandbox, the
+// same documented stand-in AssetUploadSession uses (docs/DEBT.md) — swaps for
+// real S3 once available with no shape change here.
+model ExportPack {
+  id                String    @id @default(cuid())
+  tenantId          String
+  listingId         String
+  connectionId      String
+  connectorSlug     String
+  status            String    @default("GENERATED") // EXPORT_PACK_STATUSES
+  locale            String    @default("en")
+  storageKey        String
+  fileName          String
+  sizeBytes         Int
+  confirmedByUserId String?
+  confirmedByUserAt DateTime?
+  createdById       String
+  createdAt         DateTime  @default(now())
+
+  tenant     Tenant           @relation(fields: [tenantId], references: [id])
+  listing    Listing          @relation(fields: [listingId], references: [id])
+  connection Connection       @relation(fields: [connectionId], references: [id])
+  items      ExportPackItem[]
+
+  @@index([tenantId, listingId])
+  @@index([tenantId, status])
+}
+
+model ExportPackItem {
+  id           String   @id @default(cuid())
+  tenantId     String
+  exportPackId String
+  kind         String // EXPORT_PACK_ITEM_KINDS
+  fileName     String
+  sizeBytes    Int
+  createdAt    DateTime @default(now())
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id])
+  exportPack ExportPack @relation(fields: [exportPackId], references: [id])
+
+  @@index([tenantId, exportPackId])
+}
+
+// IP/trademark policy linter dictionary (4.11) — GLOBAL, admin-editable, same
+// reasoning as ConnectorDefinition: a banned-term list is a platform-wide
+// policy fact, not tenant data. Hard-blocks publish (featureslist.md 5.15).
+model BannedTerm {
+  id        String   @id @default(cuid())
+  term      String
+  category  String // BANNED_TERM_CATEGORIES
+  matchType String   @default("FUZZY") // BANNED_TERM_MATCH_TYPES
+  note      String?
+  isActive  Boolean  @default(true)
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([term, category])
+  @@index([isActive])
+}
+
+// ---------------------------------------------------------------------------
+// Consumer points & wallet (docs/points-extension.md §6)
+// ---------------------------------------------------------------------------
+
+model Wallet {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String
+  balance   BigInt   @default(0) // derived projection of VALIDATED PointTransactions
+  version   Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions PointTransaction[]
+  user         User               @relation(fields: [userId], references: [id])
+  tenant       Tenant             @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, userId])
+  @@index([tenantId])
+}
+
+model PointTransaction {
+  id          String    @id @default(cuid())
+  walletId    String
+  tenantId    String
+  userId      String
+  type        String // POINT_TRANSACTION_TYPES: EARN | SPEND | ADJUST | EXPIRY
+  amount      BigInt // signed: + earn, - spend
+  source      String // video_watch | referral_signup | product_purchase | admin_adjust | redemption_refund
+  sourceId    String?
+  metadata    Json?
+  status      String    @default("PENDING") // TRANSACTION_STATUSES: PENDING | VALIDATED | REVERSED
+  validatedAt DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  wallet Wallet @relation(fields: [walletId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([walletId, createdAt])
+  // DB-level idempotent double-award guard (docs/points-extension.md §16 DoD
+  // / §14) — added THIS pass on top of the plain index Phase 0 scaffolded:
+  // one credited/attempted PointTransaction per (tenant, source, sourceId).
+  // Postgres treats each NULL sourceId as distinct, so unlimited
+  // "admin_adjust" rows (which have no natural sourceId) are unaffected;
+  // "video_watch"/"redemption"/"redemption_refund" rows (which always carry
+  // a real sourceId) get real double-insert protection at the DB layer, not
+  // just an application-level check-then-act race.
+  @@unique([tenantId, source, sourceId])
+  @@index([status, expiresAt])
+}
+
+model TenantPointSettings {
+  id                     String    @id @default(cuid())
+  tenantId               String    @unique
+  currencyCode           String    @default("USD")
+  pointsPerCurrencyMinor Int       @default(1)
+  minRedeemPoints        Int       @default(100)
+  maxRedeemSharePct      Int       @default(50)
+  autoExpireDays         Int?
+  expiryReminderDays     Int       @default(30)
+  redemptionEnabled      Boolean   @default(true)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+}
+
+model PointEarningRule {
+  id              String    @id @default(cuid())
+  tenantId        String
+  action          String // video_watch | referral_signup | product_purchase_reward
+  points          Int
+  minWatchSeconds Int?
+  maxDailyCap     Int?
+  cooldownSeconds Int?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, action])
+}
+
+model VideoContent {
+  id              String    @id @default(cuid())
+  tenantId        String
+  title           String
+  url             String // CDN/S3 asset URL
+  durationSeconds Int
+  thumbnailUrl    String?
+  pointsPerView   Int?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+
+  tenant  Tenant      @relation(fields: [tenantId], references: [id])
+  watches VideoWatch[]
+
+  @@index([tenantId, isActive])
+}
+
+model VideoWatch {
+  id                String    @id @default(cuid())
+  tenantId          String
+  userId            String
+  videoId           String
+  startTime         DateTime
+  endTime           DateTime?
+  watchSeconds      Int       @default(0) // running accumulator of *verified* (capped, server-gap) seconds
+  status            String    @default("STARTED") // WATCH_STATUSES incl. FRAUD_SUSPECT | CREDITED
+  heartbeatCount    Int       @default(0)
+  maxGapSeconds     Int?      // largest RAW (uncapped) gap seen — fraud signal input (§8.1)
+  transactionId     String?
+  deviceFingerprint String?
+  ipAddress         String?
+  // Implementation additions beyond points-extension.md §6's literal field list — required
+  // to run the §8.1 heartbeat protocol (server-received-timestamp gap accounting + client
+  // watchPosition acceleration check) without a live Redis session store (§4's "Redis is a
+  // cache, DB is the source of truth" pattern applied to the watch session itself, not just
+  // the daily-cap counter). Documented here rather than silently added.
+  lastHeartbeatAt   DateTime? // server-received time of the previous heartbeat, for gap math
+  lastWatchPosition Int?      // client-claimed position at the previous heartbeat, for acceleration checks
+  fraudSignals      Json?     // array of signal codes recorded when status -> FRAUD_SUSPECT (§8.1/§8.5)
+  createdAt         DateTime  @default(now())
+
+  user   User         @relation(fields: [userId], references: [id])
+  video  VideoContent @relation(fields: [videoId], references: [id])
+  tenant Tenant       @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, userId, videoId])
+  @@index([status, createdAt])
+  @@index([ipAddress, createdAt])
+}
+
+model ProductPurchaseWithPoints {
+  id                    String    @id @default(cuid())
+  tenantId              String
+  userId                String
+  productId             String
+  // Phase 5: real FK now that Order exists (was a bare unlinked String? in
+  // Phase 4.5, docs/DEBT.md 4.5-D6 / docs/OPEN_QUESTIONS.md #41 — closed this
+  // pass). Stays nullable: a redemption can still be previewed/confirmed
+  // against a bare product (e.g. a quick single-item checkout that hasn't
+  // created its Order row yet) before the caller backfills it via
+  // `RedemptionService.attachOrder`; the math itself never depended on this.
+  orderId               String?
+  pointsUsed            BigInt
+  discountCurrencyMinor BigInt
+  status                String    @default("PENDING") // PURCHASE_STATUSES
+  idempotencyKey        String?
+  createdAt             DateTime  @default(now())
+
+  user    User    @relation(fields: [userId], references: [id])
+  tenant  Tenant  @relation(fields: [tenantId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+  order   Order?  @relation(fields: [orderId], references: [id])
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([userId])
+  @@index([orderId])
+}
+
+// ---------------------------------------------------------------------------
+// Minimal double-entry ledger primitive (prompt.md "CONSUMER MODE" section +
+// points-extension.md §7.4) — built now, real, so a redemption discount always
+// posts a balanced entry. Phase 6 (Finance/Ledger/Tax) OWNS the full ledger
+// (FX, reconciliation engine, fee decomposition, Payout/PayoutLine linkage,
+// period locks) and will EXTEND this table, not replace it — same "real,
+// minimal, extensible" pattern this codebase already uses elsewhere (e.g.
+// FxRate in Phase 2 as a bare cache ahead of Phase 6's full FX ingestion).
+model LedgerEntry {
+  id         String   @id @default(cuid())
+  tenantId   String
+  occurredAt DateTime @default(now())
+  memo       String
+  sourceType String   // "points_redemption" | "points_redemption_refund" | "order_revenue" | "order_fees" | "order_refund" | "payout" | "expense" | "fx_gain_loss" | "manual_adjustment" | ...
+  sourceId   String?  // e.g. ProductPurchaseWithPoints.id, Order.id, Expense.id
+  // Phase 6 additions (tasks 6.1/6.6/6.11) — additive columns, both
+  // defaulted so every pre-Phase-6 row (redemption discount/refund
+  // postings) stays valid with no backfill needed. `isAdjustment` marks an
+  // entry as the ONLY kind of posting `LedgerService` will accept once its
+  // `occurredAt` falls inside a `PeriodLock`ed period; `reasonCode` is
+  // mandatory (enforced in the service, not the DB) whenever `isAdjustment`
+  // is true.
+  isAdjustment Boolean @default(false)
+  reasonCode   String?
+  createdById  String?
+  createdAt  DateTime @default(now())
+
+  tenant   Tenant       @relation(fields: [tenantId], references: [id])
+  lines    LedgerLine[]
+  expenses Expense[]
+
+  @@index([tenantId, sourceType, sourceId])
+  @@index([tenantId, occurredAt])
+}
+
+model LedgerLine {
+  id            String   @id @default(cuid())
+  ledgerEntryId String
+  tenantId      String
+  accountCode   String   // "points_liability" | "sales_discounts" | ...
+  direction     String   // LEDGER_DIRECTIONS: DEBIT | CREDIT
+  amountMinor   BigInt   // always non-negative; sign carried by `direction`
+  currencyCode  String
+  createdAt     DateTime @default(now())
+
+  ledgerEntry       LedgerEntry        @relation(fields: [ledgerEntryId], references: [id])
+  tenant            Tenant             @relation(fields: [tenantId], references: [id])
+  financePayoutLine FinancePayoutLine?
+
+  @@index([ledgerEntryId])
+  @@index([tenantId, accountCode])
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 — Orders, Fulfilment & Digital Delivery
+// prompt.md data model: `Order ─┬─ OrderItem ─── Fulfilment ─── Shipment ─── TrackingEvent`,
+// `├─ OrderFee`, `├─ OrderException`; `Return, Refund, Reprint`;
+// `DigitalProduct ─┬─ DigitalFile ─── DigitalFileVersion, ├─ LicenceKey,
+// ├─ Entitlement, ├─ DeliveryLog`; `Coupon ─── CouponRedemption`.
+// Conventions carried over unchanged: id=cuid, tenantId indexed + RLS
+// (infra/db/rls.sql), money = BigInt minor units + sibling currency column,
+// status/kind columns are Strings validated against packages/shared enums.
+// ---------------------------------------------------------------------------
+
+// One order, normalised from whichever channel it came from (`connectorSlug`
+// denormalised like Listing/Connection). `externalOrderId` is null only for
+// an OmniSell-native digital-only sale with no connector involved ("manual").
+model Order {
+  id               String    @id @default(cuid())
+  tenantId         String
+  connectionId     String?
+  connectorSlug    String // denormalised; "manual" when connectionId is null
+  externalOrderId  String? // provider's own order id; null for a manual order
+  orderNumber      String // human-facing number (provider's, or OmniSell-generated for manual)
+  status           String    @default("NEW") // ORDER_STATUSES
+  buyerName        String?
+  buyerEmail       String?
+  shippingAddress  Json?
+  billingAddress   Json?
+  currency         String
+  subtotalMinor    BigInt
+  discountMinor    BigInt    @default(0)
+  taxMinor         BigInt    @default(0)
+  shippingMinor    BigInt    @default(0)
+  totalMinor       BigInt
+  placedAt         DateTime
+  holdReason       String?
+  cancelReason     String?
+  cancelledAt      DateTime?
+  closedAt         DateTime?
+  ingestSource     String    @default("manual") // ORDER_INGEST_SOURCES: webhook | poll | manual
+  lastSyncedAt     DateTime?
+  createdById      String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  tenant           Tenant                      @relation(fields: [tenantId], references: [id])
+  connection       Connection?                 @relation(fields: [connectionId], references: [id])
+  items            OrderItem[]
+  fees             OrderFee[]
+  exceptions       OrderException[]
+  events           OrderEvent[]
+  fulfilments      Fulfilment[]
+  returns          Return[]
+  refunds          Refund[]
+  reprints         Reprint[]
+  entitlements     Entitlement[]
+  couponRedemptions CouponRedemption[]
+  pointRedemptions ProductPurchaseWithPoints[]
+  buyerMessageLogs BuyerMessageLog[]
+  financePayoutLines FinancePayoutLine[]
+  invoices         Invoice[]
+
+  // A given channel's order id is unique per tenant+connector; NULL
+  // externalOrderId rows (manual orders) are each distinct under Postgres'
+  // NULL-is-distinct semantics, so this never blocks multiple manual orders.
+  @@unique([tenantId, connectorSlug, externalOrderId])
+  @@index([tenantId, status])
+  @@index([tenantId, placedAt])
+  @@index([tenantId, connectionId])
+}
+
+// One line item. `productVariantId`/`listingVariantId` link back into the
+// catalog/publishing graph when OmniSell recognises the SKU; `digitalProductId`
+// is set for a digital-delivery line (task 5.10's entitlement/delivery path
+// keys off this, not off the parent Order).
+model OrderItem {
+  id                String   @id @default(cuid())
+  tenantId          String
+  orderId           String
+  externalVariantId String?
+  productVariantId  String?
+  listingVariantId  String?
+  digitalProductId  String?
+  title             String
+  sku               String?
+  quantity          Int
+  unitPriceMinor    BigInt
+  totalPriceMinor   BigInt
+  currency          String
+  isDigital         Boolean  @default(false)
+  createdAt         DateTime @default(now())
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id])
+  order          Order           @relation(fields: [orderId], references: [id])
+  productVariant ProductVariant? @relation(fields: [productVariantId], references: [id])
+  listingVariant ListingVariant? @relation(fields: [listingVariantId], references: [id])
+  digitalProduct DigitalProduct? @relation(fields: [digitalProductId], references: [id])
+  fulfilments    Fulfilment[]
+  entitlements   Entitlement[]
+
+  @@index([tenantId, orderId])
+}
+
+// Idempotent webhook-event dedupe (prompt.md constraint #5 — "every inbound
+// webhook is deduplicated by provider event ID"). One row per
+// (tenant, connector, provider event id); a replayed delivery of the same
+// event id is a genuine no-op, not a second ingestion.
+model OrderWebhookEvent {
+  id              String    @id @default(cuid())
+  tenantId        String
+  connectionId    String?
+  connectorSlug   String
+  externalEventId String // provider's own event/delivery id — the dedupe key
+  eventType       String?
+  orderId         String?
+  signatureValid  Boolean   @default(false)
+  rawPayload      Json?
+  receivedAt      DateTime  @default(now())
+  processedAt     DateTime?
+  processError    String?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, connectorSlug, externalEventId])
+  @@index([tenantId, connectorSlug, receivedAt])
+}
+
+// Polling-fallback cursor for connectors without webhook support
+// (`ordersMechanism: 'poll'`, task 5.1). One row per Connection.
+model OrderPollCursor {
+  id           String    @id @default(cuid())
+  tenantId     String
+  connectionId String    @unique
+  cursor       String?
+  lastPolledAt DateTime?
+  lastError    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id])
+  connection Connection @relation(fields: [connectionId], references: [id])
+}
+
+model OrderFee {
+  id          String   @id @default(cuid())
+  tenantId    String
+  orderId     String
+  type        String // ORDER_FEE_TYPES
+  amountMinor BigInt
+  currency    String
+  note        String?
+  createdAt   DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  order  Order  @relation(fields: [orderId], references: [id])
+
+  @@index([tenantId, orderId])
+}
+
+// Exception queue row (featureslist.md 6.7) with SLA timer fields (6.11).
+// `slaDueAt` is computed at creation from a per-type SLA config;
+// `breachedAt` is stamped by the SLA sweep the first time it notices
+// `slaDueAt` has passed on a still-open row (never recomputed after).
+model OrderException {
+  id             String    @id @default(cuid())
+  tenantId       String
+  orderId        String
+  type           String // ORDER_EXCEPTION_TYPES
+  status         String    @default("OPEN") // ORDER_EXCEPTION_STATUSES
+  message        String
+  slaDueAt       DateTime?
+  breachedAt     DateTime?
+  breachAlertSentAt DateTime?
+  resolvedAt     DateTime?
+  resolvedById   String?
+  resolutionNote String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  order  Order  @relation(fields: [orderId], references: [id])
+
+  @@index([tenantId, status])
+  @@index([tenantId, slaDueAt])
+  @@index([tenantId, orderId])
+}
+
+// Activity timeline — identical role to ListingEvent (Phase 4).
+model OrderEvent {
+  id        String   @id @default(cuid())
+  tenantId  String
+  orderId   String
+  type      String // ORDER_EVENT_TYPES
+  message   String
+  payload   Json?
+  actorId   String?
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  order  Order  @relation(fields: [orderId], references: [id])
+
+  @@index([tenantId, orderId, createdAt])
+}
+
+// Per-tenant auto-routing configuration (featureslist.md 6.4). Evaluated in
+// `priority` order (lower first); the first ACTIVE rule whose `conditions`
+// match wins. No matching rule -> `routingStrategy: null` on the resulting
+// Fulfilment, i.e. manual provider choice.
+model FulfilmentRoutingRule {
+  id         String   @id @default(cuid())
+  tenantId   String
+  name       String
+  strategy   String // ROUTING_STRATEGIES
+  priority   Int      @default(0)
+  conditions Json? // { regions?: string[], connectorSlugs?: string[], productIds?: string[] }
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, isActive, priority])
+}
+
+// One submission-to-a-provider unit of work. `orderItemId` is null for a
+// whole-order fulfilment (the common case for a single-provider order);
+// set when an order's items are split across providers by the routing
+// engine (e.g. one item is CHEAPEST-routed to Printify, another to Gelato).
+model Fulfilment {
+  id                   String    @id @default(cuid())
+  tenantId             String
+  orderId              String
+  orderItemId          String?
+  connectionId         String?
+  connectorSlug        String?
+  externalFulfilmentId String?
+  status               String    @default("PENDING") // FULFILMENT_STATUSES
+  routingStrategy      String? // ROUTING_STRATEGIES — null = manual choice
+  routingRuleId        String?
+  submittedAt          DateTime?
+  lastError            String?
+  idempotencyKey       String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id])
+  order      Order       @relation(fields: [orderId], references: [id])
+  orderItem  OrderItem?  @relation(fields: [orderItemId], references: [id])
+  connection Connection? @relation(fields: [connectionId], references: [id])
+  shipments  Shipment[]
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, orderId])
+  @@index([tenantId, status])
+}
+
+model Shipment {
+  id                  String    @id @default(cuid())
+  tenantId            String
+  fulfilmentId        String
+  carrier             String?
+  trackingNumber      String?
+  trackingUrl         String? // generated carrier link (task 5.5)
+  status              String    @default("LABEL_CREATED") // SHIPMENT_STATUSES
+  shippedAt           DateTime?
+  estimatedDeliveryAt DateTime?
+  deliveredAt         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id])
+  fulfilment     Fulfilment      @relation(fields: [fulfilmentId], references: [id])
+  trackingEvents TrackingEvent[]
+
+  @@index([tenantId, fulfilmentId])
+}
+
+model TrackingEvent {
+  id          String   @id @default(cuid())
+  tenantId    String
+  shipmentId  String
+  status      String // SHIPMENT_STATUSES
+  description String?
+  location    String?
+  occurredAt  DateTime
+  createdAt   DateTime @default(now())
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id])
+  shipment Shipment @relation(fields: [shipmentId], references: [id])
+
+  @@index([tenantId, shipmentId, occurredAt])
+}
+
+model Return {
+  id          String   @id @default(cuid())
+  tenantId    String
+  orderId     String
+  status      String   @default("REQUESTED") // RETURN_STATUSES
+  reason      String?
+  itemIds     Json? // OrderItem.id[]
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id])
+  order   Order    @relation(fields: [orderId], references: [id])
+  refunds Refund[]
+
+  @@index([tenantId, orderId])
+}
+
+// Cost attribution (featureslist.md 6.8 — "with cost attribution to ledger")
+// is recorded on `costAttribution`; posting the actual LedgerEntry/LedgerLine
+// pair for it is Phase 6 scope (this table just carries the real breakdown
+// data Phase 6's ledger will consume — same "real, minimal, extensible"
+// pattern as `LedgerEntry`'s own doc comment).
+model Refund {
+  id              String    @id @default(cuid())
+  tenantId        String
+  orderId         String
+  returnId        String?
+  amountMinor     BigInt
+  currency        String
+  reason          String?
+  status          String    @default("PENDING") // REFUND_STATUSES
+  costAttribution Json? // { printCostMinor?, shippingMinor?, feeMinor?, ... }
+  idempotencyKey  String?
+  createdById     String?
+  createdAt       DateTime  @default(now())
+  completedAt     DateTime?
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id])
+  order  Order   @relation(fields: [orderId], references: [id])
+  return Return? @relation(fields: [returnId], references: [id])
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, orderId])
+}
+
+model Reprint {
+  id            String   @id @default(cuid())
+  tenantId      String
+  orderId       String
+  orderItemId   String?
+  reason        String?
+  status        String   @default("REQUESTED") // REPRINT_STATUSES
+  costMinor     BigInt   @default(0)
+  currency      String   @default("USD")
+  idempotencyKey String?
+  createdById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  order  Order  @relation(fields: [orderId], references: [id])
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, orderId])
+}
+
+// Saved views for the unified order feed (task 5.3).
+model SavedOrderView {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String
+  name      String
+  filters   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([tenantId, userId, name])
+}
+
+// Buyer message templates (featureslist.md 6.10) — one row per
+// (tenant, type, locale); `isDefault` marks the seeded starter copy so the
+// UI can offer "reset to default" without losing a tenant's customisation.
+model BuyerMessageTemplate {
+  id        String   @id @default(cuid())
+  tenantId  String
+  type      String // BUYER_MESSAGE_TYPES
+  locale    String   @default("en")
+  subject   String
+  body      String
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, type, locale])
+}
+
+model BuyerMessageLog {
+  id           String   @id @default(cuid())
+  tenantId     String
+  orderId      String
+  templateType String // BUYER_MESSAGE_TYPES
+  locale       String
+  toEmail      String?
+  subject      String
+  sentById     String?
+  createdAt    DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  order  Order  @relation(fields: [orderId], references: [id])
+
+  @@index([tenantId, orderId])
+}
+
+// ---------------------------------------------------------------------------
+// Digital Products (featureslist.md §7)
+// ---------------------------------------------------------------------------
+
+model DigitalProduct {
+  id          String   @id @default(cuid())
+  tenantId    String
+  productId   String? // optional link into the catalog Product master
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  product      Product?      @relation(fields: [productId], references: [id])
+  files        DigitalFile[]
+  licenceKeys  LicenceKey[]
+  entitlements Entitlement[]
+  orderItems   OrderItem[]
+
+  @@index([tenantId])
+}
+
+model DigitalFile {
+  id               String   @id @default(cuid())
+  tenantId         String
+  digitalProductId String
+  name             String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  tenant         Tenant               @relation(fields: [tenantId], references: [id])
+  digitalProduct DigitalProduct       @relation(fields: [digitalProductId], references: [id])
+  versions       DigitalFileVersion[]
+
+  @@index([tenantId, digitalProductId])
+}
+
+// Append-only version history (mirrors AssetVersion's Phase 2 "append, never
+// rewrite" pattern) — a new upload creates a new version and flips
+// `isCurrent`; nothing is ever overwritten in place.
+model DigitalFileVersion {
+  id            String   @id @default(cuid())
+  tenantId      String
+  digitalFileId String
+  version       String // e.g. "1.0.0"
+  storageKey    String // ObjectStorage key (Phase 2 pipeline)
+  sizeBytes     BigInt?
+  checksum      String?
+  isCurrent     Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  tenant       Tenant          @relation(fields: [tenantId], references: [id])
+  digitalFile  DigitalFile     @relation(fields: [digitalFileId], references: [id])
+  deliveryTokens DeliveryToken[]
+  deliveryLogs DeliveryLog[]
+
+  @@unique([digitalFileId, version])
+  @@index([tenantId, digitalFileId, isCurrent])
+}
+
+// One buyer's right to a DigitalProduct (task 5.10/7.4 — "tied to
+// order/customer"). `userId` is set for a logged-in OmniSell user;
+// `buyerEmail` covers a guest checkout on a connected storefront.
+model Entitlement {
+  id               String    @id @default(cuid())
+  tenantId         String
+  userId           String?
+  buyerEmail       String?
+  digitalProductId String
+  orderId          String?
+  orderItemId      String?
+  status           String    @default("ACTIVE") // ENTITLEMENT_STATUSES
+  createdAt        DateTime  @default(now())
+  revokedAt        DateTime?
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id])
+  user           User?           @relation(fields: [userId], references: [id])
+  digitalProduct DigitalProduct  @relation(fields: [digitalProductId], references: [id])
+  order          Order?          @relation(fields: [orderId], references: [id])
+  orderItem      OrderItem?      @relation(fields: [orderItemId], references: [id])
+  licenceKeys    LicenceKey[]
+  deliveryTokens DeliveryToken[]
+  deliveryLogs   DeliveryLog[]
+
+  @@index([tenantId, digitalProductId])
+  @@index([tenantId, userId])
+  @@index([tenantId, buyerEmail])
+}
+
+// A short-lived, capped download grant (task 5.10/7.2 — "TTL + IP +
+// download-count caps"). The opaque bearer token handed to the buyer is
+// NEVER stored — only its sha256 (`tokenHash`), same secret-at-rest
+// discipline as Phase 3's Credential vault, so a DB read can never leak a
+// live download link.
+model DeliveryToken {
+  id                   String    @id @default(cuid())
+  tenantId             String
+  entitlementId        String
+  digitalFileVersionId String
+  tokenHash            String    @unique
+  expiresAt            DateTime
+  maxDownloads         Int       @default(5)
+  downloadCount        Int       @default(0)
+  allowedIp            String?
+  revokedAt            DateTime?
+  createdAt            DateTime  @default(now())
+
+  tenant             Tenant             @relation(fields: [tenantId], references: [id])
+  entitlement        Entitlement        @relation(fields: [entitlementId], references: [id])
+  digitalFileVersion DigitalFileVersion @relation(fields: [digitalFileVersionId], references: [id])
+  deliveryLogs       DeliveryLog[]
+
+  @@index([tenantId, entitlementId])
+  @@index([expiresAt])
+}
+
+// Delivery log with resend + audit (task 5.10/7.5). `DENIED` rows record
+// exactly why (`DELIVERY_DENIAL_REASONS`) for the admin-visible audit trail
+// — the buyer-facing error is always a generic 403/410, never the reason.
+model DeliveryLog {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  entitlementId        String
+  digitalFileVersionId String
+  deliveryTokenId      String?
+  action               String // DELIVERY_LOG_ACTIONS
+  ipAddress            String?
+  reason               String? // set when action === 'DENIED' — DELIVERY_DENIAL_REASONS
+  createdAt            DateTime @default(now())
+
+  tenant             Tenant              @relation(fields: [tenantId], references: [id])
+  entitlement        Entitlement         @relation(fields: [entitlementId], references: [id])
+  digitalFileVersion DigitalFileVersion  @relation(fields: [digitalFileVersionId], references: [id])
+  deliveryToken      DeliveryToken?      @relation(fields: [deliveryTokenId], references: [id])
+
+  @@index([tenantId, entitlementId, createdAt])
+}
+
+// Licence keys (featureslist.md 7.3) — pattern-configurable generation lives
+// in the service layer; this row is the persisted result + activation state.
+model LicenceKey {
+  id               String    @id @default(cuid())
+  tenantId         String
+  digitalProductId String
+  entitlementId    String?
+  keyValue         String
+  activationLimit  Int       @default(1)
+  activationCount  Int       @default(0)
+  status           String    @default("ACTIVE") // LICENCE_KEY_STATUSES
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  tenant         Tenant                 @relation(fields: [tenantId], references: [id])
+  digitalProduct DigitalProduct         @relation(fields: [digitalProductId], references: [id])
+  entitlement    Entitlement?           @relation(fields: [entitlementId], references: [id])
+  activations    LicenceKeyActivation[]
+
+  @@unique([tenantId, keyValue])
+  @@index([tenantId, digitalProductId])
+}
+
+model LicenceKeyActivation {
+  id            String    @id @default(cuid())
+  tenantId      String
+  licenceKeyId  String
+  deviceId      String
+  deviceLabel   String?
+  activatedAt   DateTime  @default(now())
+  deactivatedAt DateTime?
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id])
+  licenceKey LicenceKey @relation(fields: [licenceKeyId], references: [id])
+
+  @@unique([licenceKeyId, deviceId])
+  @@index([tenantId, licenceKeyId])
+}
+
+// Coupon engine (featureslist.md 7.6). `channels`: [] means "all channels";
+// a non-empty array is a connectorSlug allowlist.
+model Coupon {
+  id               String    @id @default(cuid())
+  tenantId         String
+  code             String
+  type             String // COUPON_TYPES: PERCENT | FIXED | BOGO
+  valuePercent     Int?
+  valueMinor       BigInt?
+  currency         String?
+  usageLimit       Int?
+  usageCount       Int       @default(0)
+  perCustomerLimit Int?
+  startsAt         DateTime?
+  expiresAt        DateTime?
+  channels         String[]  @default([])
+  isActive         Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id])
+  redemptions CouponRedemption[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+}
+
+model CouponRedemption {
+  id             String   @id @default(cuid())
+  tenantId       String
+  couponId       String
+  orderId        String?
+  buyerEmail     String?
+  discountMinor  BigInt
+  currency       String
+  idempotencyKey String?
+  createdAt      DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  coupon Coupon @relation(fields: [couponId], references: [id])
+  order  Order? @relation(fields: [orderId], references: [id])
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, couponId])
+}
+
+// ---------------------------------------------------------------------------
+// Phase 6 — Finance, Ledger & Tax (implentationplanphase.md tasks 6.1-6.11,
+// featureslist.md §9). Extends, not replaces, the Phase 4.5 LedgerEntry/
+// LedgerLine primitive above (docs/OPEN_QUESTIONS.md #38 — the two new
+// columns added to LedgerEntry there are additive).
+//
+// NAMING NOTE: prompt.md's data-model tree calls for a bare `Payout`/
+// `PayoutLine` pair. A `Payout` model already exists further below (part of
+// the unrelated "Global Marketplace"/GlobalMart affiliate extension —
+// affiliate/supplier payouts, a different product living in this same
+// monorepo, explicitly out of this phase's scope). To avoid colliding with
+// that pre-existing, out-of-scope model, Finance's payout pair is named
+// `FinancePayout`/`FinancePayoutLine` here — same shape prompt.md specifies
+// (`reconciledLedgerLineId?` on the line), different name. See
+// docs/OPEN_QUESTIONS.md.
+// ---------------------------------------------------------------------------
+
+// Expense tracking with receipt upload (task 6.5). Reuses Phase 2's S3
+// presign pipeline for `receiptStorageKey` (same `ObjectStorage` bucket, a
+// `tenants/{tenantId}/receipts/...` prefix). `ocrStatus` defaults to
+// `UNAVAILABLE` — the honest, non-fabricated default in this sandbox (no OCR
+// engine/service reachable here, docs/DEBT.md); it is never silently set to
+// `COMPLETED` with fake extracted text.
+model Expense {
+  id                String    @id @default(cuid())
+  tenantId          String
+  category          String // EXPENSE_CATEGORIES
+  vendor            String?
+  description       String?
+  amountMinor       BigInt
+  currency          String
+  incurredAt        DateTime
+  status            String    @default("PENDING") // EXPENSE_STATUSES
+  receiptStorageKey String?
+  receiptMimeType   String?
+  ocrStatus         String    @default("UNAVAILABLE") // OCR_STATUSES
+  ocrText           String?
+  createdById       String?
+  approvedById      String?
+  approvedAt        DateTime?
+  ledgerEntryId     String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  ledgerEntry LedgerEntry? @relation(fields: [ledgerEntryId], references: [id])
+
+  @@index([tenantId, status])
+  @@index([tenantId, incurredAt])
+}
+
+// Earnings ingestion + payout reconciliation (task 6.4). One row per
+// (tenant, connection, period) payout batch expected/received from a
+// channel; `FinancePayoutLine` is the per-order breakdown the reconciliation
+// engine compares against the ledger's own expected `accounts_receivable`
+// postings for the same period.
+model FinancePayout {
+  id             String    @id @default(cuid())
+  tenantId       String
+  connectionId   String?
+  connectorSlug  String
+  currency       String
+  amountMinor    BigInt // actual amount received (0 until `RECEIVED`)
+  expectedMinor  BigInt? // sum of expected AR postings for this connection/period
+  varianceMinor  BigInt?
+  varianceStatus String    @default("PENDING") // RECONCILIATION_VARIANCE_STATUSES
+  status         String    @default("EXPECTED") // FINANCE_PAYOUT_STATUSES
+  externalRef    String?
+  periodStart    DateTime
+  periodEnd      DateTime
+  receivedAt     DateTime?
+  reconciledAt   DateTime?
+  reconciledById String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  tenant     Tenant              @relation(fields: [tenantId], references: [id])
+  connection Connection?         @relation(fields: [connectionId], references: [id])
+  lines      FinancePayoutLine[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, connectionId, periodStart])
+}
+
+model FinancePayoutLine {
+  id                     String   @id @default(cuid())
+  tenantId               String
+  financePayoutId        String
+  orderId                String?
+  description            String
+  amountMinor            BigInt
+  currency               String
+  reconciledLedgerLineId String?  @unique
+  createdAt              DateTime @default(now())
+
+  tenant               Tenant        @relation(fields: [tenantId], references: [id])
+  financePayout        FinancePayout @relation(fields: [financePayoutId], references: [id])
+  order                Order?        @relation(fields: [orderId], references: [id])
+  reconciledLedgerLine LedgerLine?   @relation(fields: [reconciledLedgerLineId], references: [id])
+
+  @@index([tenantId, financePayoutId])
+}
+
+// Invoices (gigs/contracts task 6.9's `GET /gigs/invoices` surface + Tax
+// Centre/ZATCA). `ZatcaInvoiceMeta` (below) is the KSA Phase-2 e-invoicing
+// extension, one-to-one, only populated behind the `zatca_einvoicing` flag.
+model Invoice {
+  id              String    @id @default(cuid())
+  tenantId        String
+  orderId         String?
+  invoiceNumber   String
+  type            String    @default("STANDARD") // INVOICE_TYPES
+  status          String    @default("DRAFT") // INVOICE_STATUSES
+  currency        String
+  subtotalMinor   BigInt
+  taxMinor        BigInt
+  totalMinor      BigInt
+  buyerName       String?
+  buyerVatNumber  String?
+  sellerVatNumber String?
+  issuedAt        DateTime?
+  dueAt           DateTime?
+  pdfStorageKey   String?
+  createdById     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tenant Tenant            @relation(fields: [tenantId], references: [id])
+  order  Order?            @relation(fields: [orderId], references: [id])
+  lines  InvoiceLine[]
+  zatca  ZatcaInvoiceMeta?
+
+  @@unique([tenantId, invoiceNumber])
+  @@index([tenantId, status])
+  @@index([tenantId, orderId])
+}
+
+model InvoiceLine {
+  id             String   @id @default(cuid())
+  tenantId       String
+  invoiceId      String
+  description    String
+  quantity       Int      @default(1)
+  unitPriceMinor BigInt
+  taxRatePct     Decimal  @default(0)
+  taxMinor       BigInt   @default(0)
+  totalMinor     BigInt
+  createdAt      DateTime @default(now())
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id])
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([tenantId, invoiceId])
+}
+
+// KSA ZATCA Phase-2 e-invoicing metadata (task 6.8, behind the
+// `zatca_einvoicing` feature flag). See docs/DEBT.md for exactly what is
+// standards-verified here vs. best-effort: the UBL 2.1 XML element set and
+// the TLV/base64 QR tag layout are built against ZATCA's own published
+// technical resources (cited in the builder service's doc comment); the
+// cryptographic stamp is a REAL ECDSA (secp256k1) signature over the
+// invoice hash using a LOCALLY GENERATED keypair — NOT a certificate issued
+// through ZATCA's own CSID/compliance-CSID onboarding (which requires a
+// live government API call this sandbox cannot make). Real cryptography,
+// not a real ZATCA-accredited certificate chain.
+model ZatcaInvoiceMeta {
+  id                  String    @id @default(cuid())
+  tenantId            String
+  invoiceId           String    @unique
+  uuid                String    @unique
+  invoiceHash         String
+  previousInvoiceHash String?
+  qrTlvBase64         String
+  signatureBase64     String
+  publicKeyBase64     String
+  ublXml              String
+  clearanceStatus     String    @default("NOT_SUBMITTED") // ZATCA_CLEARANCE_STATUSES
+  submittedAt         DateTime?
+  createdAt           DateTime  @default(now())
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id])
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([tenantId])
+}
+
+// Tax Centre nexus configuration (task 6.7) — which jurisdictions a tenant
+// is registered/liable in. Real per-jurisdiction rate/threshold config the
+// Tax Centre's summary calculations read; not itself a tax calculation.
+model TaxNexus {
+  id               String    @id @default(cuid())
+  tenantId         String
+  jurisdictionType String // TAX_JURISDICTION_TYPES
+  jurisdictionCode String // e.g. "CA" (US state), "SA" (GCC VAT), "EU" (OSS)
+  registeredAt     DateTime?
+  thresholdMinor   BigInt?
+  ratePct          Decimal   @default(0)
+  isActive         Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, jurisdictionType, jurisdictionCode])
+  @@index([tenantId, isActive])
+}
+
+// Period close / lock (task 6.6). Once LOCKED, `LedgerService` rejects any
+// non-adjustment posting whose `occurredAt` falls inside
+// `[periodStart, periodEnd]` — enforced in code (`ledger.service.ts`), not
+// just a UI convention.
+model PeriodLock {
+  id          String    @id @default(cuid())
+  tenantId    String
+  periodStart DateTime
+  periodEnd   DateTime
+  status      String    @default("OPEN") // PERIOD_LOCK_STATUSES
+  lockedById  String?
+  lockedAt    DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, periodStart, periodEnd])
+  @@index([tenantId, status])
+}
+
+// Admin finance ops: disputes register (task 6.11).
+model FinanceDispute {
+  id           String    @id @default(cuid())
+  tenantId     String
+  sourceType   String // e.g. "order" | "financePayout" | "refund"
+  sourceId     String
+  amountMinor  BigInt
+  currency     String
+  status       String    @default("OPEN") // DISPUTE_STATUSES
+  reasonCode   String
+  note         String?
+  raisedById   String?
+  resolvedById String?
+  resolvedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, status])
+}
+
+// Billing (task 6.10, Stripe Billing). `Plan` is GLOBAL (prompt.md's
+// non-tenant model list); a `Subscription` links exactly one tenant to one
+// Plan. Real Stripe Billing calls (`apps/api/src/finance/billing/*`) are
+// gated behind `STRIPE_SECRET_KEY` presence, same honest pattern as every
+// other payment/connector integration in this codebase — absent here
+// (docs/DEBT.md), so these rows are populated from a real local state
+// machine even when Stripe itself is unreachable.
+model Plan {
+  id                String   @id @default(cuid())
+  slug              String   @unique
+  name              String
+  priceMinor        BigInt
+  currency          String   @default("USD")
+  interval          String   @default("MONTH") // PLAN_INTERVALS
+  aiCreditsIncluded Int      @default(0)
+  stripePriceId     String?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id                   String    @id @default(cuid())
+  tenantId             String    @unique
+  planId               String
+  status               String    @default("INCOMPLETE") // SUBSCRIPTION_STATUSES
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  currentPeriodStart   DateTime?
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean   @default(false)
+  dunningAttempts      Int       @default(0)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  tenant         Tenant           @relation(fields: [tenantId], references: [id])
+  plan           Plan             @relation(fields: [planId], references: [id])
+  usageRecords   UsageRecord[]
+  aiCreditLedger AiCreditLedger[]
+
+  @@index([status])
+}
+
+model UsageRecord {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  subscriptionId      String
+  kind                String // USAGE_RECORD_KINDS
+  quantity             Int
+  occurredAt          DateTime @default(now())
+  stripeUsageRecordId String?
+  createdAt           DateTime @default(now())
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id])
+  subscription Subscription @relation(fields: [subscriptionId], references: [id])
+
+  @@index([tenantId, kind, occurredAt])
+}
+
+model AiCreditLedger {
+  id             String   @id @default(cuid())
+  tenantId       String
+  subscriptionId String?
+  delta          Int // positive = grant, negative = spend
+  balanceAfter   Int
+  reason         String // AI_CREDIT_LEDGER_REASONS
+  refType        String?
+  refId          String?
+  createdAt      DateTime @default(now())
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  @@index([tenantId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Global Marketplace (country-aware marketplace & monetization extension)
+// Spec source: ecom-front.txt — global marketplace with countries, suppliers,
+// affiliates, tasks/offers, commissions and payouts. Models are GLOBAL (not
+// tenant-scoped): the marketplace storefront is platform-wide, per the spec.
+// Conventions carried over: money is BIGINT minor units, enums are String
+// columns with documented value sets, every user-facing table soft-deletes.
+// ---------------------------------------------------------------------------
+
+model CountryConfig {
+  id                    String   @id @default(cuid())
+  code                  String   @unique // ISO 3166-1 alpha-2, e.g. "SA"
+  name                  String // "Saudi Arabia"
+  nativeName            String?
+  currency              String   @default("USD") // ISO-4217
+  currencySymbol        String   @default("")
+  defaultLanguage       String   @default("en") // BCP-47, e.g. "ar"
+  timezone              String   @default("UTC") // IANA, e.g. "Asia/Riyadh"
+  isActive              Boolean  @default(true)
+  supportedPayments     Json     @default("[]") // e.g. ["STRIPE","MOBICASH"]
+  supportedMarketplaces Json     @default("[]") // e.g. ["AMAZON","NOON"]
+  shippingProviders     Json     @default("[]") // e.g. ["Aramex","SMSA"]
+  metadata              Json?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([isActive])
+}
+
+model MarketplaceCategory {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  description String?
+  parentId    String?
+  countries   String[] @default([]) // ISO codes it is available in; empty = all countries
+  imageUrl    String?
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  parent   MarketplaceCategory?   @relation("CategoryTree", fields: [parentId], references: [id])
+  children MarketplaceCategory[]  @relation("CategoryTree")
+  products MarketplaceProduct[]
+
+  @@index([parentId])
+  @@index([isActive, sortOrder])
+}
+
+// Unified product row (spec §45 Product Data Engine). `source` records where the
+// product came from (SUPPLIER | AMAZON | ALIEXPRESS | TEMU | MOCK | MANUAL);
+// `sourceProductId` keeps the provider's own id when applicable.
+model MarketplaceProduct {
+  id                  String   @id @default(cuid())
+  supplierId          String?
+  source              String   @default("SUPPLIER")
+  sourceProductId     String?
+  name                String
+  slug                String   @unique
+  description         String?
+  sku                 String?
+  categoryId          String?
+  brand               String?
+  priceMinor          BigInt // money is integers, minor units (repo convention)
+  originalPriceMinor  BigInt?
+  currency            String   @default("USD")
+  inventory           Int      @default(0)
+  images              Json     @default("[]") // array of object-storage urls
+  variants            Json     @default("[]")
+  weight              String?
+  dimensions          String?
+  rating              Decimal  @default(0)
+  ratingCount         Int      @default(0)
+  shippingCountries   String[] @default([]) // ISO codes this product ships to
+  shippingCostMinor   BigInt   @default(0)
+  estimatedDeliveryDays String? // "5–10 days"
+  affiliateCommissionPct Decimal? // product-level override for the commission engine
+  attributes          Json?
+  status              String   @default("DRAFT") // PRODUCT_STATUSES: DRAFT | REVIEW | ACTIVE | ARCHIVED
+  isActive            Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  deletedAt           DateTime?
+
+  supplier          Supplier?              @relation(fields: [supplierId], references: [id])
+  category          MarketplaceCategory?   @relation(fields: [categoryId], references: [id])
+  affiliateLinks    AffiliateLink[]
+  affiliateCommissions AffiliateCommission[]
+
+  @@index([slug])
+  @@index([categoryId])
+  @@index([supplierId])
+  @@index([isActive, status])
+  @@index([currency, priceMinor])
+}
+
+model Supplier {
+  id                      String   @id @default(cuid())
+  userId                  String?
+  companyName             String
+  legalName               String?
+  contactPerson           String?
+  email                   String   @unique
+  phone                   String?
+  countryCode             String // ISO 3166-1 alpha-2
+  city                    String?
+  address                 String?
+  website                 String?
+  businessType            String? // SOLE_PROPRIETOR | LLC | CORPORATION | ...
+  taxVatNumber            String?
+  businessRegistrationNo  String?
+  productCategories       String[] @default([])
+  shippingCountries       String[] @default([])
+  fulfillmentMethod       String? // DROPSHIPPING | SELF_FULFILLED | 3PL
+  returnPolicy            String?
+  logoUrl                 String?
+  status                  String   @default("PENDING") // SUPPLIER_STATUSES: PENDING | UNDER_REVIEW | APPROVED | REJECTED | SUSPENDED
+  riskScore               Int      @default(0) // 0..100, spec §21
+  kyStatus                String   @default("UNVERIFIED") // KYC/KYB: UNVERIFIED | PENDING | VERIFIED | REJECTED
+  approvedById            String?
+  approvedAt              DateTime?
+  rejectionReason         String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+  deletedAt               DateTime?
+
+  user      User?                @relation(fields: [userId], references: [id])
+  documents SupplierDocument[]
+  products  MarketplaceProduct[]
+  payouts   Payout[]
+
+  @@index([countryCode])
+  @@index([status])
+}
+
+model SupplierDocument {
+  id           String   @id @default(cuid())
+  supplierId   String
+  kind         String // BUSINESS_REGISTRATION | TAX | ID | LOGO | ...
+  url          String
+  status       String   @default("PENDING") // DOCUMENT_STATUSES: PENDING | VERIFIED | REJECTED
+  reviewedById String?
+  reviewedAt   DateTime?
+  createdAt    DateTime @default(now())
+
+  supplier Supplier @relation(fields: [supplierId], references: [id])
+
+  @@index([supplierId])
+}
+
+model Affiliate {
+  id                  String   @id @default(cuid())
+  userId              String?
+  fullName            String
+  email               String   @unique
+  phone               String?
+  countryCode         String // ISO 3166-1 alpha-2
+  website             String?
+  socialProfiles      Json     @default("[]")
+  trafficSource       String? // BLOG | YOUTUBE | TIKTOK | INSTAGRAM | PAID_ADS | ...
+  niche               String?
+  preferredCategories String[] @default([])
+  payoutMethod        String? // PAYPAL | STRIPE | BANK | MOCK
+  taxInformation      String?
+  code                String   @unique // public referral code, e.g. "AF123456"
+  status              String   @default("PENDING") // AFFILIATE_STATUSES: PENDING | APPROVED | REJECTED | SUSPENDED
+  riskScore           Int      @default(0) // 0..100
+  approvedById        String?
+  approvedAt          DateTime?
+  rejectionReason     String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  deletedAt           DateTime?
+
+  user         User?                 @relation(fields: [userId], references: [id])
+  links        AffiliateLink[]
+  clicks       AffiliateClick[]
+  commissions  AffiliateCommission[]
+  referrals    Referral[]            @relation("AffiliateReferrals")
+  payouts      Payout[]
+
+  @@index([countryCode])
+  @@index([code])
+  @@index([status])
+}
+
+model AffiliateLink {
+  id            String   @id @default(cuid())
+  affiliateId   String
+  productId     String?
+  type          String   @default("PRODUCT") // LINK_TYPES: PRODUCT | CATEGORY | LANDING | CAMPAIGN
+  title         String?
+  url           String // full generated tracking URL
+  campaignId    String?
+  subId         String?
+  trafficSource String?
+  countryCode   String?
+  clicks        Int      @default(0) // denormalised counters (server-incremented)
+  conversions   Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  affiliate   Affiliate            @relation(fields: [affiliateId], references: [id])
+  product     MarketplaceProduct?  @relation(fields: [productId], references: [id])
+  clickEvents AffiliateClick[]
+
+  @@index([affiliateId])
+  @@index([productId])
+  @@index([campaignId])
+}
+
+model AffiliateClick {
+  id          String   @id @default(cuid())
+  affiliateId String
+  linkId      String?
+  productId   String?
+  visitorId   String?
+  countryCode String?
+  device      String? // MOBILE | DESKTOP | TABLET
+  referrer    String?
+  ipHash      String? // hashed, never raw IPs
+  isFraud     Boolean  @default(false)
+  riskScore   Int      @default(0)
+  clientTs    DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  affiliate Affiliate       @relation(fields: [affiliateId], references: [id])
+  link      AffiliateLink?  @relation(fields: [linkId], references: [id])
+
+  @@index([affiliateId, createdAt])
+  @@index([visitorId])
+  @@index([productId])
+}
+
+model AffiliateCommission {
+  id              String    @id @default(cuid())
+  affiliateId     String
+  linkId          String?
+  productId       String?
+  orderRef        String? // external/order reference when attribution converts
+  orderTotalMinor BigInt    @default(0)
+  amountMinor     BigInt    @default(0)
+  currency        String    @default("USD")
+  rateType        String    @default("PERCENT") // COMMISSION_RATE_TYPES: PERCENT | FIXED
+  rateValue       Decimal   @default(0)
+  status          String    @default("PENDING") // COMMISSION_STATUSES: PENDING | APPROVED | REJECTED | REVERSED | PAID
+  windowDays      Int       @default(30) // attribution window in days
+  approvedAt      DateTime?
+  reversedAt      DateTime?
+  paidAt          DateTime?
+  payoutId        String?
+  createdAt       DateTime  @default(now())
+
+  affiliate Affiliate           @relation(fields: [affiliateId], references: [id])
+  product   MarketplaceProduct? @relation(fields: [productId], references: [id])
+  payout    Payout?             @relation(fields: [payoutId], references: [id])
+
+  @@index([affiliateId, status])
+  @@index([orderRef])
+}
+
+model Task {
+  id                     String   @id @default(cuid())
+  provider               String   @default("MOCK") // TASK_PROVIDERS: MOCK | MTURK | CLICKWORKER | APPEN | REMOTASKS
+  title                  String
+  description            String?
+  taskType               String   @default("MICRO") // MICRO | SURVEY | USER_TESTING | AD | APP_INSTALL | LEAD | ENGAGEMENT
+  rewardMinor            BigInt
+  currency               String   @default("USD")
+  estimatedMinutes       Int      @default(5)
+  countryAvailability    String[] @default([]) // empty = all countries
+  deviceCompatibility    String[] @default([])
+  maxCompletionsPerUser  Int      @default(1)
+  isActive               Boolean  @default(true)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  completions TaskCompletion[]
+
+  @@index([provider])
+  @@index([isActive, taskType])
+}
+
+model TaskCompletion {
+  id             String    @id @default(cuid())
+  userId         String
+  taskId         String
+  status         String    @default("PENDING") // COMPLETION_STATUSES: PENDING | APPROVED | REJECTED
+  rewardMinor    BigInt    @default(0)
+  currency       String    @default("USD")
+  riskScore      Int       @default(0)
+  validationData Json?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  approvedAt     DateTime?
+  externalRef    String?
+  createdAt      DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+  task Task @relation(fields: [taskId], references: [id])
+
+  @@unique([userId, taskId])
+  @@index([userId, status])
+}
+
+model Offer {
+  id                  String   @id @default(cuid())
+  provider            String   @default("MOCK") // OFFER_PROVIDERS: MOCK | OFFERTORO | ADWORKMEDIA
+  title               String
+  description         String?
+  rewardMinor         BigInt
+  currency            String   @default("USD")
+  estimatedMinutes    Int      @default(5)
+  countryAvailability String[] @default([]) // empty = all countries
+  deviceCompatibility String[] @default([])
+  url                 String?
+  status              String   @default("ACTIVE") // OFFER_STATUSES: ACTIVE | PAUSED | EXPIRED
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  completions OfferCompletion[]
+
+  @@index([provider])
+  @@index([isActive])
+}
+
+model OfferCompletion {
+  id          String   @id @default(cuid())
+  userId      String
+  offerId     String
+  status      String   @default("PENDING") // COMPLETION_STATUSES
+  rewardMinor BigInt   @default(0)
+  currency    String   @default("USD")
+  riskScore   Int      @default(0)
+  externalRef String?
+  startedAt   DateTime?
+  completedAt DateTime?
+  approvedAt  DateTime?
+  createdAt   DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id])
+  offer Offer @relation(fields: [offerId], references: [id])
+
+  @@unique([userId, offerId])
+  @@index([userId, status])
+}
+
+// Configurable commission engine (spec §19/§56). Resolution priority: CAMPAIGN >
+// PRODUCT override > SUPPLIER > CATEGORY > COUNTRY > GLOBAL. All values are stored,
+// never hard-coded in components.
+model CommissionRule {
+  id        String   @id @default(cuid())
+  scope     String // GLOBAL | CATEGORY | COUNTRY | SUPPLIER | CAMPAIGN
+  scopeKey  String? // categoryId | countryCode | supplierId | campaignId
+  rateType  String   @default("PERCENT") // PERCENT | FIXED
+  rateValue Decimal
+  priority  Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([scope, scopeKey])
+  @@index([isActive, scope])
+}
+
+model Payout {
+  id            String    @id @default(cuid())
+  userId        String?
+  affiliateId   String?
+  supplierId    String?
+  amountMinor   BigInt
+  currency      String    @default("USD")
+  method        String // PAYOUT_METHODS: PAYPAL | STRIPE | BANK | MANUAL | MOCK
+  destination   String?
+  status        String    @default("REQUESTED") // PAYOUT_STATUSES: REQUESTED | APPROVED | PROCESSING | PAID | FAILED | REJECTED
+  idempotencyKey String?  @unique
+  externalRef   String?
+  approvedById  String?
+  approvedAt    DateTime?
+  paidAt        DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user      User?                @relation(fields: [userId], references: [id])
+  affiliate Affiliate?           @relation(fields: [affiliateId], references: [id])
+  supplier  Supplier?            @relation(fields: [supplierId], references: [id])
+  commissions AffiliateCommission[]
+
+  @@index([userId])
+  @@index([affiliateId])
+  @@index([supplierId])
+  @@index([status])
+}
+
+model Referral {
+  id              String    @id @default(cuid())
+  referrerUserId  String
+  referredUserId  String?
+  affiliateId     String?
+  code            String
+  via             String    @default("LINK") // REFERRAL_VIA: LINK | CODE | AFFILIATE
+  status          String    @default("CLICKED") // REFERRAL_STATUSES: CLICKED | REGISTERED | VERIFIED | CONVERTED | REWARDED
+  rewardMinor     BigInt    @default(0)
+  currency        String    @default("USD")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user      User        @relation("ReferralReferrer", fields: [referrerUserId], references: [id])
+  referred  User?       @relation("ReferralReferred", fields: [referredUserId], references: [id])
+  affiliate Affiliate?  @relation("AffiliateReferrals", fields: [affiliateId], references: [id])
+
+  @@index([code])
+  @@index([referrerUserId])
+  @@index([status])
+}

@@ -1,0 +1,33 @@
+{
+  "name": "@omnisell/admin",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3001",
+    "build": "next build",
+    "start": "next start -p 3001",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "echo '[e2e:admin] Playwright suite is declared in CI (E2E=1). Skipping locally.'"
+  },
+  "dependencies": {
+    "@omnisell/api-client": "workspace:*",
+    "@omnisell/i18n": "workspace:*",
+    "@omnisell/shared": "workspace:*",
+    "@omnisell/ui": "workspace:*",
+    "next": "15.0.3",
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
+  },
+  "devDependencies": {
+    "@omnisell/config": "workspace:*",
+    "@types/node": "22.7.5",
+    "@types/react": "19.0.0",
+    "@types/react-dom": "19.0.0",
+    "autoprefixer": "10.4.20",
+    "postcss": "8.4.47",
+    "tailwindcss": "3.4.14",
+    "typescript": "5.5.4",
+    "vitest": "2.1.3"
+  }
+}

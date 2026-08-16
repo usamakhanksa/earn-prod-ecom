@@ -1,0 +1,57 @@
+{
+  "name": "omnisell",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev --continue --parallel",
+    "dev:api": "pnpm --filter @omnisell/api dev",
+    "dev:web": "pnpm --filter @omnisell/web dev",
+    "dev:admin": "pnpm --filter @omnisell/admin dev",
+    "dev:mobile": "pnpm --filter @omnisell/mobile dev",
+    "build": "turbo run build",
+    "lint": "eslint .",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:unit": "turbo run test",
+    "test:integration": "pnpm --filter @omnisell/api test:integration",
+    "test:e2e": "run-s test:e2e:api test:e2e:web",
+    "test:e2e:api": "pnpm --filter @omnisell/api test:e2e",
+    "test:e2e:web": "pnpm --filter @omnisell/web test:e2e",
+    "axe": "pnpm --filter @omnisell/api run axe",
+    "db:migrate": "pnpm --filter @omnisell/api db:migrate",
+    "db:deploy": "pnpm --filter @omnisell/api db:deploy",
+    "db:seed": "pnpm --filter @omnisell/api db:seed",
+    "db:studio": "pnpm --filter @omnisell/api db:studio",
+    "db:generate": "pnpm --filter @omnisell/api db:generate",
+    "format": "prettier --write .",
+    "openapi:gen": "pnpm --filter @omnisell/api-client generate",
+    "prepare": "husky || exit 0"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.14.0",
+    "@commitlint/cli": "19.5.0",
+    "@commitlint/config-conventional": "19.5.0",
+    "eslint": "9.14.0",
+    "eslint-config-prettier": "9.1.0",
+    "eslint-plugin-jsx-a11y": "6.10.2",
+    "eslint-plugin-react": "7.37.2",
+    "eslint-plugin-react-hooks": "5.0.0",
+    "husky": "9.1.6",
+    "lint-staged": "15.2.10",
+    "npm-run-all2": "6.2.6",
+    "pnpm": "9.15.0",
+    "prettier": "3.3.3",
+    "turbo": "2.3.3",
+    "typescript": "5.5.4",
+    "typescript-eslint": "8.12.2"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,mjs,cjs,json,md,mdx,css}": [
+      "prettier --write"
+    ]
+  }
+}

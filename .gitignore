@@ -1,0 +1,43 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+build/
+.next/
+.expo/
+web-build/
+out/
+coverage/
+.turbo/
+
+# env & secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# prisma
+apps/api/prisma/*.db
+apps/api/prisma/*.db-journal
+
+# resumable-upload scratch storage (Phase 2, docs/DEBT.md 2-D2) — disk-backed
+# stand-in for S3 multipart, never committed
+.upload-scratch/
+apps/api/.upload-scratch/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# generated
+packages/api-client/src/types.openapi.gen.ts
